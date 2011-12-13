@@ -1,0 +1,12 @@
+Quick start:
+
+1. Include airbag_fd.cpp and airbag_fd.h in your project.
+2. Define the appropriate HAVE_* symbols somehow.
+3. Call one of the airbag_init_* functions early.
+4. Post-crash (perhaps in a watchdog or on next startup) harvest crash logs.
+
+Example test:
+
+$ g++ -O -W -Wall -DHAVE_STRSIGNAL -DHAVE_EXECINFO_H -DHAVE_DLADDR airbag_fd.cpp airbag_fd_test.cpp -o airbag_fd_test -ldl
+$ ./airbag_fd_test.sh
+

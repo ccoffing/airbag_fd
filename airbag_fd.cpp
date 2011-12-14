@@ -28,6 +28,8 @@
  * @todo stop other threads, get their backtraces
  * @todo improve crashes on multiple threads: races opening, mixed output, ...
  * @todo test on more architectures: arm
+ * @todo function prologue / epilogue on ARM: http://www.mcternan.me.uk/ArmStackUnwinding/
+ * @todo heuristic prints from walkStack are printed before the backtrace header
  * @todo test on more OSs: bsd
  */
 
@@ -89,7 +91,9 @@ static const size_t ALT_STACK_SIZE = SIGSTKSZ;
 static void* s_altStackSpace;
 static stack_t s_altStack;
 
-#ifndef HAVE_STRSIGNAL
+/*
+ * Do not use strsignal; it is not async signal safe.
+ */
 static const int MAX_SIGNALS = 32;
 static const char *sigNames[MAX_SIGNALS] =
 {
@@ -127,11 +131,11 @@ static const char *sigNames[MAX_SIGNALS] =
     /*[SIGSYS   ] =*/ "SIGSYS"
 };
 
-static const char* strsignal(int sigNum)
+static const char* _strsignal(int sigNum)
 {
     return sigNum >= MAX_SIGNALS ? "unknown" : sigNames[sigNum];
 }
-#endif
+
 
 #if defined(__x86_64__)
 #define NMCTXREGS NGREG
@@ -549,7 +553,7 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
         s_fd = 2;
     int fd = s_fd;
 
-    sigPrintf(fd, "Caught %s (%u)", strsignal(sigNum), sigNum);
+    sigPrintf(fd, "Caught %s (%u)", _strsignal(sigNum), sigNum);
     if (si->si_code == SI_USER)
         sigPrintf(fd, " sent by user %u from process %u\n", si->si_uid, si->si_pid);
     else if (si->si_code == SI_TKILL)

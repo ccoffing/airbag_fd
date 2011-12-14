@@ -14,7 +14,6 @@
  *
  * Autoconf-style configuration options supported:
  * - HAVE_EXECINFO_H
- * - HAVE_STRSIGNAL
  * - HAVE_DLADDR
  * - HAVE_BACKTRACE_SYMBOLS_FD
  * - HAVE_BACKTRACE

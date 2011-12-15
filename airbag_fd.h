@@ -12,11 +12,10 @@
  * state, such as jumping through a bad pointer or a blown stack.  The harvesting and reporting
  * of the crash log is left as an exercise for the reader.
  *
- * Autoconf-style configuration options supported:
- * - HAVE_EXECINFO_H
- * - HAVE_DLADDR
- * - HAVE_BACKTRACE_SYMBOLS_FD
- * - HAVE_BACKTRACE
+ * Define any of the following, if your platform is missing that functionality:
+ * - DISABLE_DLADDR
+ * - DISABLE_BACKTRACE_SYMBOLS_FD
+ * - DISABLE_BACKTRACE
  *
  * C++ users are covered; airbag_fd catches SIGABRT.  By default, std::terminate and
  * std::unexpected abort() the program.

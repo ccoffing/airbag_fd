@@ -30,6 +30,7 @@
  * @todo test on more architectures: arm
  * @todo function prologue / epilogue on ARM: http://www.mcternan.me.uk/ArmStackUnwinding/
  * @todo heuristic prints from walkStack are printed before the backtrace header
+ * @todo if failed to get any backtrace, scan /proc/pid/maps for library offsets
  * @todo test on more OSs: bsd
  */
 
@@ -54,9 +55,7 @@
 #include <stdio.h>
 #include <dlfcn.h>
 #include <arpa/inet.h>  /* for htonl */
-#ifdef HAVE_EXECINFO_H
 #include <execinfo.h>
-#endif
 
 #if defined(__GNUC__) && defined(__cplusplus)
 #include <cxxabi.h>
@@ -334,7 +333,7 @@ static const char* demangle(const char *mangled)
 
 static void writeSymbolsFd(void *const *buffer, int *repeat, int size, int fd)
 {
-#if defined(HAVE_DLADDR)
+#if !defined(DISABLE_DLADDR)
     for (int i = 0; i < size; ++i) {
         Dl_info info;
         if (dladdr(buffer[i], &info)) {
@@ -347,7 +346,8 @@ static void writeSymbolsFd(void *const *buffer, int *repeat, int size, int fd)
             sigPrintf(fd, " (called %u times)", repeat[i]+1);
         sigPrintf(fd, "\n");
     }
-#elif defined(HAVE_BACKTRACE_SYMBOLS_FD)
+
+#elif !defined(DISABLE_BACKTRACE_SYMBOLS_FD)
     /* backtrace_symbols_fd is built on snprintf, which is async-signal-safe on OpenBSD and might be on others. */
     backtrace_symbols_fd(buffer, size, fd);
 #else
@@ -477,6 +477,9 @@ backward:
         sp = (uint32_t*)((uint32_t)sp + stackSize);
     }
     return depth;
+// #elif defined(__arm__)
+//     /* algorithm derived from http://www.mcternan.me.uk/ArmStackUnwinding/ */
+//     /* TODO */
 #elif defined(USE_GCC_UNWIND)
     /* Not preferred, because doesn't handle blown stack, etc. */
     static void *handle = dlopen("libgcc_s.so.1", RTLD_LAZY);
@@ -519,7 +522,7 @@ backward:
             return arg.cnt != -1 ? arg.cnt : 0;
         }
     }
-#elif defined(HAVE_BACKTRACE)
+#elif !defined(DISABLE_BACKTRACE)
     /*
      * Not preferred, because no way to explicitly start at failing PC, doesn't handle
      * bad PC, doesn't handle blown stack, etc.
@@ -532,7 +535,7 @@ backward:
 
 static void outputWhere(int fd, void* pc)
 {
-#if defined(HAVE_DLADDR)
+#if !defined(DISABLE_DLADDR)
     Dl_info info;
     if (dladdr(pc, &info)) {
         sigPrintf(fd, " in %s\n", demangle(info.dli_sname));

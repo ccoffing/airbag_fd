@@ -22,16 +22,16 @@
 
 
 /**
- * @todo deinit: restore old sig handlers
  * @todo improve GCC's unwind with bad PC, blown stack, etc
  * @todo clean up sizeof(void*) vs sizeof(int)
  * @todo stop other threads, get their backtraces
- * @todo improve crashes on multiple threads: races opening, mixed output, ...
+ * @todo improve crashes on multiple threads: sa_mask
  * @todo test on more architectures: arm
  * @todo function prologue / epilogue on ARM: http://www.mcternan.me.uk/ArmStackUnwinding/
  * @todo heuristic prints from walkStack are printed before the backtrace header
  * @todo if failed to get any backtrace, scan /proc/pid/maps for library offsets
  * @todo test on more OSs: bsd
+ * @todo callback, to print custom data
  */
 
 #ifndef _BSD_SOURCE
@@ -42,8 +42,8 @@
 #endif
 #include <stdint.h>
 #include <sys/types.h>
-#include <sys/stat.h>
 #include <stddef.h>
+#include <sys/stat.h>
 #include <stdarg.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -83,56 +83,60 @@ static const char* s_filename;
 
 static const int debug = 0;
 
+#if defined(USE_GCC_DEMANGLE)
 static char* s_demangleBuf;
 static size_t s_demangleBufLen;
+#endif
 
 static const size_t ALT_STACK_SIZE = SIGSTKSZ;
 static void* s_altStackSpace;
 static stack_t s_altStack;
 
-/*
- * Do not use strsignal; it is not async signal safe.
- */
+static const char unknown[] = "???";
+
 static const int MAX_SIGNALS = 32;
 static const char *sigNames[MAX_SIGNALS] =
 {
-    /*[0        ] =*/ "none",
-    /*[SIGHUP   ] =*/ "SIGHUP",
-    /*[SIGINT   ] =*/ "SIGINT",
-    /*[SIGQUIT  ] =*/ "SIGQUIT",
-    /*[SIGILL   ] =*/ "SIGILL",
-    /*[SIGTRAP  ] =*/ "SIGTRAP",
-    /*[SIGABRT  ] =*/ "SIGABRT",
-    /*[SIGBUS   ] =*/ "SIGBUS",
-    /*[SIGFPE   ] =*/ "SIGFPE",
-    /*[SIGKILL  ] =*/ "SIGKILL",
-    /*[SIGUSR1  ] =*/ "SIGUSR1",
-    /*[SIGSEGV  ] =*/ "SIGSEGV",
-    /*[SIGUSR2  ] =*/ "SIGUSR2",
-    /*[SIGPIPE  ] =*/ "SIGPIPE",
-    /*[SIGALRM  ] =*/ "SIGALRM",
-    /*[SIGTERM  ] =*/ "SIGTERM",
-    /*[SIGSTKFLT] =*/ "SIGSTKFLT",
-    /*[SIGCHLD  ] =*/ "SIGCHLD",
-    /*[SIGCONT  ] =*/ "SIGCONT",
-    /*[SIGSTOP  ] =*/ "SIGSTOP",
-    /*[SIGTSTP  ] =*/ "SIGTSTP",
-    /*[SIGTTIN  ] =*/ "SIGTTIN",
-    /*[SIGTTOU  ] =*/ "SIGTTOU",
-    /*[SIGURG   ] =*/ "SIGURG",
-    /*[SIGXCPU  ] =*/ "SIGXCPU",
-    /*[SIGXFSZ  ] =*/ "SIGXFSZ",
-    /*[SIGVTALRM] =*/ "SIGVTALRM",
-    /*[SIGPROF  ] =*/ "SIGPROF",
-    /*[SIGWINCH ] =*/ "SIGWINCH",
-    /*[SIGIO    ] =*/ "SIGIO",
-    /*[SIGPWR   ] =*/ "SIGPWR",
-    /*[SIGSYS   ] =*/ "SIGSYS"
+    /*[0        ] =*/ NULL,
+    /*[SIGHUP   ] =*/ "HUP",
+    /*[SIGINT   ] =*/ "INT",
+    /*[SIGQUIT  ] =*/ "QUIT",
+    /*[SIGILL   ] =*/ "ILL",
+    /*[SIGTRAP  ] =*/ "TRAP",
+    /*[SIGABRT  ] =*/ "ABRT",
+    /*[SIGBUS   ] =*/ "BUS",
+    /*[SIGFPE   ] =*/ "FPE",
+    /*[SIGKILL  ] =*/ "KILL",
+    /*[SIGUSR1  ] =*/ "USR1",
+    /*[SIGSEGV  ] =*/ "SEGV",
+    /*[SIGUSR2  ] =*/ "USR2",
+    /*[SIGPIPE  ] =*/ "PIPE",
+    /*[SIGALRM  ] =*/ "ALRM",
+    /*[SIGTERM  ] =*/ "TERM",
+    /*[SIGSTKFLT] =*/ "STKFLT",
+    /*[SIGCHLD  ] =*/ "CHLD",
+    /*[SIGCONT  ] =*/ "CONT",
+    /*[SIGSTOP  ] =*/ "STOP",
+    /*[SIGTSTP  ] =*/ "TSTP",
+    /*[SIGTTIN  ] =*/ "TTIN",
+    /*[SIGTTOU  ] =*/ "TTOU",
+    /*[SIGURG   ] =*/ "URG",
+    /*[SIGXCPU  ] =*/ "XCPU",
+    /*[SIGXFSZ  ] =*/ "XFSZ",
+    /*[SIGVTALRM] =*/ "VTALRM",
+    /*[SIGPROF  ] =*/ "PROF",
+    /*[SIGWINCH ] =*/ "WINCH",
+    /*[SIGIO    ] =*/ "IO",
+    /*[SIGPWR   ] =*/ "PWR",
+    /*[SIGSYS   ] =*/ "SYS"
 };
 
+/*
+ * Do not use strsignal; it is not async signal safe.
+ */
 static const char* _strsignal(int sigNum)
 {
-    return sigNum >= MAX_SIGNALS ? "unknown" : sigNames[sigNum];
+    return sigNum < 1 || sigNum >= MAX_SIGNALS ? unknown : sigNames[sigNum];
 }
 
 
@@ -240,15 +244,14 @@ static uint32_t load32(const void *_p, int fd[2], uint32_t *_v)
 }
 
 
-static int sigWrite(int fd, const char* buf, size_t len)
+static int airbag_write(int fd, const char* buf, size_t len)
 {
     while (write(fd, buf, len) == -1 && errno == EINTR)
         ;
     return len;
 }
 
-/* Extremely simple printf-replacement, which is asynchonous-signal safe. */
-static int sigPrintf(int fd, const char *fmt, ...)
+int airbag_printf(int fd, const char *fmt, ...)
 {
     int chars = 0;
     const int MAXDIGITS = 32;
@@ -258,7 +261,7 @@ static int sigPrintf(int fd, const char *fmt, ...)
     while (*fmt) {
         const char *p = strchr(fmt, '%');
         size_t len = p ? (size_t)(p-fmt) : strlen(fmt);
-        chars += sigWrite(fd, fmt, len);
+        chars += airbag_write(fd, fmt, len);
         if (p) {
             ++p;
             int width = -1;
@@ -271,7 +274,7 @@ static int sigPrintf(int fd, const char *fmt, ...)
             switch (*p) {
                 case 's': {
                     const char *s = va_arg(ap, char*);
-                    chars += sigWrite(fd, s, strlen(s));
+                    chars += airbag_write(fd, s, strlen(s));
                     len += 2;
                     break;
                 }
@@ -284,7 +287,7 @@ static int sigPrintf(int fd, const char *fmt, ...)
                         n >>= 4;
                         buf[--i] = (digit>9) ? (digit-10+'a') : (digit+'0');
                     } while (n || width > MAXDIGITS-i-1);
-                    chars += sigWrite(fd, buf+i, MAXDIGITS-i-1);
+                    chars += airbag_write(fd, buf+i, MAXDIGITS-i-1);
                     len += 2;
                     break;
                 }
@@ -297,12 +300,12 @@ static int sigPrintf(int fd, const char *fmt, ...)
                         n /= 10;
                         buf[--i] = digit+'0';
                     } while (n);
-                    chars += sigWrite(fd, buf+i, MAXDIGITS-i-1);
+                    chars += airbag_write(fd, buf+i, MAXDIGITS-i-1);
                     len += 2;
                     break;
                 }
                 default:
-                    chars += sigWrite(fd, p-1, 1);
+                    chars += airbag_write(fd, p-1, 1);
                     len += 1;
                     break;
             }
@@ -317,7 +320,7 @@ static int sigPrintf(int fd, const char *fmt, ...)
 static const char* demangle(const char *mangled)
 {
     if (! mangled)
-        return "???";
+        return unknown;
 #if defined(USE_GCC_DEMANGLE)
     int status;
     char *newBuf = abi::__cxa_demangle(mangled, s_demangleBuf, &s_demangleBufLen, &status);
@@ -331,20 +334,20 @@ static const char* demangle(const char *mangled)
 }
 
 
-static void writeSymbolsFd(void *const *buffer, int *repeat, int size, int fd)
+static void printSymbols(void *const *buffer, int *repeat, int size, int fd)
 {
 #if !defined(DISABLE_DLADDR)
     for (int i = 0; i < size; ++i) {
         Dl_info info;
         if (dladdr(buffer[i], &info)) {
             int offset = (ptrdiff_t)buffer[i] - (ptrdiff_t)info.dli_saddr;
-            sigPrintf(fd, "%s(%s+0x%x)[0x%x]", info.dli_fname, demangle(info.dli_sname), offset, buffer[i]);
+            airbag_printf(fd, "%s(%s+0x%x)[0x%x]", info.dli_fname, demangle(info.dli_sname), offset, buffer[i]);
         } else {
-            sigPrintf(fd, "[0x%x]", buffer[i]);
+            airbag_printf(fd, "[0x%x]", buffer[i]);
         }
         if (repeat[i])
-            sigPrintf(fd, " (called %u times)", repeat[i]+1);
-        sigPrintf(fd, "\n");
+            airbag_printf(fd, " (called %u times)", repeat[i]+1);
+        airbag_printf(fd, "\n");
     }
 
 #elif !defined(DISABLE_BACKTRACE_SYMBOLS_FD)
@@ -352,10 +355,10 @@ static void writeSymbolsFd(void *const *buffer, int *repeat, int size, int fd)
     backtrace_symbols_fd(buffer, size, fd);
 #else
     for (int i = 0; i < size; ++i) {
-        sigPrintf(fd, "[0x%x]", buffer[i]);
+        airbag_printf(fd, "[0x%x]", buffer[i]);
         if (repeat[i])
-            sigPrintf(fd, " (called %u times)", repeat[i]+1);
-        sigPrintf(fd, "\n");
+            airbag_printf(fd, " (called %u times)", repeat[i]+1);
+        airbag_printf(fd, "\n");
     }
 #endif
 }
@@ -412,18 +415,18 @@ int airbag_walkstack(int fd, void **buffer, int *repeat, int size, ucontext_t *u
     for (addr = pc; !raOffset | !stackSize; --addr) {
         uint32_t v;
         if (load32(addr, p.fds, &v)) {
-            sigPrintf(fd, "Text at %x is not mapped; trying prior frame pointer.\n", addr);
+            airbag_printf(fd, "Text at %x is not mapped; trying prior frame pointer.\n", addr);
             uc->uc_mcontext.pc = (uint32_t)ra;
             goto backward;
         }
         switch (v & 0xffff0000) {
             case 0x27bd0000:  /* addiu   sp,sp,??? */
                 stackSize = abs((short)(v & 0xffff));
-                if (debug) sigPrintf(fd, "[%08x]: stack size %u\n", addr, stackSize);
+                if (debug) airbag_printf(fd, "[%08x]: stack size %u\n", addr, stackSize);
                 break;
             case 0xafbf0000:  /* sw      ra,???(sp) */
                 raOffset = (v & 0xffff);
-                if (debug) sigPrintf(fd, "[%08x]: ra offset %u\n", addr, raOffset);
+                if (debug) airbag_printf(fd, "[%08x]: ra offset %u\n", addr, raOffset);
                 break;
             case 0x3c1c0000:  /* lui     gp,??? */
                 goto out;
@@ -435,7 +438,7 @@ out:
     if (raOffset) {
         uint32_t *newRa;
         if (load32((uint32_t*)((uint32_t)sp + raOffset), p.fds, (uint32_t*)&newRa))
-            sigPrintf(fd, "Text at RA <- SP[raOffset] %x[%x] is not mapped; assuming blown stack.\n", sp, raOffset);
+            airbag_printf(fd, "Text at RA <- SP[raOffset] %x[%x] is not mapped; assuming blown stack.\n", sp, raOffset);
         else
             ra = newRa;
     }
@@ -452,17 +455,17 @@ backward:
         for (addr = ra; !raOffset || !stackSize; --addr) {
             uint32_t v;
             if (load32(addr, p.fds, &v)) {
-                sigPrintf(fd, "Text at %x is not mapped; terminating backtrace.\n", addr);
+                airbag_printf(fd, "Text at %x is not mapped; terminating backtrace.\n", addr);
                 return depth;
             }
             switch (v & 0xffff0000) {
                 case 0x27bd0000:  /* addiu   sp,sp,??? */
                     stackSize = abs((short)(v & 0xffff));
-                    if (debug) sigPrintf(fd, "[%08x]: stack size %u\n", addr, stackSize);
+                    if (debug) airbag_printf(fd, "[%08x]: stack size %u\n", addr, stackSize);
                     break;
                 case 0xafbf0000:  /* sw      ra,???(sp) */
                     raOffset = (v & 0xffff);
-                    if (debug) sigPrintf(fd, "[%08x]: ra offset %u\n", addr, raOffset);
+                    if (debug) airbag_printf(fd, "[%08x]: ra offset %u\n", addr, raOffset);
                     break;
                 case 0x3c1c0000:  /* lui     gp,??? */
                     return depth + 1;
@@ -471,39 +474,39 @@ backward:
             }
         }
         if (load32((uint32_t*)((uint32_t)sp + raOffset), p.fds, (uint32_t*)&ra)) {
-            sigPrintf(fd, "Text at RA <- SP[raOffset] %x[%x] is not mapped; terminating backtrace.\n", sp, raOffset);
+            airbag_printf(fd, "Text at RA <- SP[raOffset] %x[%x] is not mapped; terminating backtrace.\n", sp, raOffset);
             return depth;
         }
         sp = (uint32_t*)((uint32_t)sp + stackSize);
     }
     return depth;
-// #elif defined(__arm__)
-//     /* algorithm derived from http://www.mcternan.me.uk/ArmStackUnwinding/ */
-//     /* TODO */
+#elif defined(EXPERIMENTAL_ARM_UNWIND) && defined(__arm__)
+    /* algorithm derived from http://www.mcternan.me.uk/ArmStackUnwinding/ */
+    /* TODO */
 #elif defined(USE_GCC_UNWIND)
     /* Not preferred, because doesn't handle blown stack, etc. */
     static void *handle = dlopen("libgcc_s.so.1", RTLD_LAZY);
-    static Unwind_Backtrace_T _Unwind_Backtrace;
+    static Unwind_Backtrace_T _unwind_Backtrace;
 
     if (handle) {
-        if (!_Unwind_Backtrace)
-            _Unwind_Backtrace = (Unwind_Backtrace_T)dlsym(handle, "_Unwind_Backtrace");
+        if (!_unwind_Backtrace)
+            _unwind_Backtrace = (Unwind_Backtrace_T)dlsym(handle, "_Unwind_Backtrace");
         if (!_unwind_GetIP)
             _unwind_GetIP = (Unwind_GetIP_T)dlsym(handle, "_Unwind_GetIP");
-        if (_Unwind_Backtrace && _unwind_GetIP) {
+        if (_unwind_Backtrace && _unwind_GetIP) {
             Pipe p;
             struct trace_arg arg = { buffer, -1, size, uc };
             if (load8((void*)(MCTX_PC(uc)), p.fds, NULL)) {
-                sigPrintf(fd, "Text at %x is not mapped; trying prior frame pointer.\n", MCTX_PC(uc));
+                airbag_printf(fd, "Text at %x is not mapped; trying prior frame pointer.\n", MCTX_PC(uc));
 #if defined(__mips__)
-                MCTX_PC(uc) = MCTXREG(uc, 31);
+                MCTX_PC(uc) = MCTXREG(uc, 31);  /* RA */
 #elif defined(__arm__)
-                MCTX_PC(uc) = MCTXREG(uc, 17);
+                MCTX_PC(uc) = MCTXREG(uc, 17);  /* LR */
 #elif defined(__i386__)
                 uint8_t* fp = (uint8_t*)MCTXREG(uc, 6) + 4;
                 uint32_t eip;
                 if (load32((void*)fp, p.fds, &eip)) {
-                    sigPrintf(fd, "Text at %x is not mapped; cannot get backtrace.\n", fp);
+                    airbag_printf(fd, "Text at %x is not mapped; cannot get backtrace.\n", fp);
                     size = 0;
                 } else {
                     MCTX_PC(uc) = eip;
@@ -517,7 +520,7 @@ backward:
             if (size >= 1) {
                 /* TODO: setjmp, catch SIGSEGV to longjmp back here, to more gracefully handle
                  * corrupted stack. */
-                _Unwind_Backtrace(backtrace_helper, &arg);
+                _unwind_Backtrace(backtrace_helper, &arg);
             }
             return arg.cnt != -1 ? arg.cnt : 0;
         }
@@ -533,16 +536,16 @@ backward:
 }
 
 
-static void outputWhere(int fd, void* pc)
+static void printWhere(void* pc)
 {
 #if !defined(DISABLE_DLADDR)
     Dl_info info;
     if (dladdr(pc, &info)) {
-        sigPrintf(fd, " in %s\n", demangle(info.dli_sname));
+        airbag_printf(s_fd, " in %s\n", demangle(info.dli_sname));
         return;
     }
 #endif
-    sigPrintf(fd, " at %x\n", pc);
+    airbag_printf(s_fd, " at %x\n", pc);
 }
 
 static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
@@ -556,16 +559,16 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
         s_fd = 2;
     int fd = s_fd;
 
-    sigPrintf(fd, "Caught %s (%u)", _strsignal(sigNum), sigNum);
+    airbag_printf(fd, "Caught SIG%s (%u)", _strsignal(sigNum), sigNum);
     if (si->si_code == SI_USER)
-        sigPrintf(fd, " sent by user %u from process %u\n", si->si_uid, si->si_pid);
+        airbag_printf(fd, " sent by user %u from process %u\n", si->si_uid, si->si_pid);
     else if (si->si_code == SI_TKILL)
-        sigPrintf(fd, " sent by tkill\n");
+        airbag_printf(fd, " sent by tkill\n");
     else if (si->si_code == SI_KERNEL) {
-        sigPrintf(fd, " sent by kernel");  /* rare; well-behaved kernel gives us a real code, handled below */
-        outputWhere(fd, (void*)pc);
+        airbag_printf(fd, " sent by kernel");  /* rare; well-behaved kernel gives us a real code, handled below */
+        printWhere((void*)pc);
     } else {
-        outputWhere(fd, (void*)pc);
+        printWhere((void*)pc);
 
         const char* faultReason = 0;
         switch(sigNum) {
@@ -625,8 +628,8 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
         }
 
         if (faultReason) {
-            sigPrintf(fd, "Fault at memory location 0x%x", si->si_addr);
-            sigPrintf(fd, " due to %s (%x).\n", faultReason, si->si_code);
+            airbag_printf(fd, "Fault at memory location 0x%x", si->si_addr);
+            airbag_printf(fd, " due to %s (%x).\n", faultReason, si->si_code);
         }
     }
 
@@ -637,24 +640,24 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
      * And yet the array is deprecated.  Bugger.
      */
     if (si->si_errno)
-        sigPrintf(fd, "Errno %u: %s.\n", si->si_errno, sys_errlist[si->si_errno]);
+        airbag_printf(fd, "Errno %u: %s.\n", si->si_errno, sys_errlist[si->si_errno]);
 #endif
 
-    sigPrintf(fd, "> Context:\n");
+    airbag_printf(fd, "> Context:\n");
     int width = 0;
     for (int i = 0; i < NMCTXREGS; ++i) {
         if (! mctxRegNames[i])  /* Can trim junk per-arch by NULL-ing name. */
             continue;
         if (i) {
             if (width > 70) {
-                sigPrintf(fd, "\n");
+                airbag_printf(fd, "\n");
                 width = 0;
             } else
-                width += sigPrintf(fd, " ");
+                width += airbag_printf(fd, " ");
         }
-        width += sigPrintf(fd, "%s:%x", mctxRegNames[i], MCTXREG(uc, i));
+        width += airbag_printf(fd, "%s:%x", mctxRegNames[i], MCTXREG(uc, i));
     }
-    sigPrintf(fd, "\n");
+    airbag_printf(fd, "\n");
 
     Pipe p;
     {
@@ -662,8 +665,8 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
         void* buffer[size];
         int repeat[size];
         int nptrs = airbag_walkstack(fd, buffer, repeat, size, uc);
-        sigPrintf(fd, "> Backtrace (%u frames from PC=%x):\n", nptrs, pc);
-        writeSymbolsFd(buffer, repeat, nptrs, fd);
+        airbag_printf(fd, "> Backtrace (%u frames from PC=%x):\n", nptrs, pc);
+        printSymbols(buffer, repeat, nptrs, fd);
         /* Reload PC; walkstack may have discovered better state. */
         pc = (uint8_t*)MCTX_PC(uc);
     }
@@ -688,25 +691,25 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
     const uint32_t* endPc = (uint32_t*)((uint8_t*)startPc + bytes);
     const uint32_t* addr;
 #endif
-    sigPrintf(fd, "> Code:\n");
+    airbag_printf(fd, "> Code:\n");
     for (addr = startPc; addr < endPc; ++addr) {
         if (addr != startPc) {
             if (width > 70) {
-                sigPrintf(fd, "\n");
+                airbag_printf(fd, "\n");
                 width = 0;
             } else
-                width += sigPrintf(fd, " ");
+                width += airbag_printf(fd, " ");
         }
         if (width == 0) {
-            sigPrintf(fd, "%x: ", addr);
+            airbag_printf(fd, "%x: ", addr);
         }
 #if defined(__x86_64__) || defined(__i386__)
         uint8_t b;
         uint8_t invalid = load8(addr, p.fds, &b);
         if (invalid)
-            sigPrintf(fd, "??");
+            airbag_printf(fd, "??");
         else
-            sigPrintf(fd, "%02x", b);
+            airbag_printf(fd, "%02x", b);
         width += 2;
 #else
         uint32_t w;
@@ -714,14 +717,14 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
         for (int i = 3; i >= 0; --i) {
             int shift = i*8;
             if ((invalid>>shift) & 0xff)
-                sigPrintf(fd, "??");
+                airbag_printf(fd, "??");
             else
-                sigPrintf(fd, "%02x", (w>>shift) & 0xff);
+                airbag_printf(fd, "%02x", (w>>shift) & 0xff);
         }
         width += 8;
 #endif
     }
-    sigPrintf(fd, "\n");
+    airbag_printf(fd, "\n");
 
     /* Do not use abort(): Would re-raise SIGABRT. */
     /* Do not use exit(): Would run atexit handlers. */
@@ -730,12 +733,14 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
 
 static int initCrashHandlers()
 {
+#if defined(USE_GCC_DEMANGLE)
     if (! s_demangleBuf) {
         s_demangleBufLen = 512;
         s_demangleBuf = (char*)malloc(s_demangleBufLen);
         if (! s_demangleBuf)
             return -1;
     }
+#endif
 
     if (! s_altStackSpace) {
         s_altStackSpace = (void*)malloc(ALT_STACK_SIZE);
@@ -771,15 +776,28 @@ static int initCrashHandlers()
 
 static void deinitCrashHandlers()
 {
-    /* TODO - unregister sig handlers */
+    sigset_t sigset;
+    sigemptyset(&sigset);
+
+    struct sigaction sa;
+    sa.sa_handler = SIG_DFL;
+    sa.sa_mask = sigset;
+    sa.sa_flags = 0;
+
+    sigaction(SIGABRT, &sa, 0);
+    sigaction(SIGBUS, &sa, 0);
+    sigaction(SIGILL, &sa, 0);
+    sigaction(SIGSEGV, &sa, 0);
+    sigaction(SIGFPE, &sa, 0);
+
+#if defined(USE_GCC_DEMANGLE)
     if (s_demangleBuf) {
         free(s_demangleBuf);
         s_demangleBuf = 0;
     }
+#endif
     if (s_altStackSpace) {
-        s_altStack.ss_sp = 0;
         s_altStack.ss_flags = SS_DISABLE;
-        s_altStack.ss_size = 0;
         sigaltstack(&s_altStack, NULL);
         free(s_altStackSpace);
         s_altStackSpace = 0;

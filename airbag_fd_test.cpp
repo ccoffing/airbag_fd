@@ -45,6 +45,13 @@ extern int crashFn3(int how)
             throw std::exception();
             break;
         }
+        case 4: {
+            fprintf(stderr, "!!! division by 0\n");
+            volatile float n = 1.0;
+            volatile float d = 0.0;
+            fprintf(stderr, "%f\n", n/d);
+            break;
+        }
     }
     return 42;
 }
@@ -83,12 +90,18 @@ int main(int argc, char** argv)
     if (argc < 2)
         usage();
 
+    fprintf(stderr, "!!! initializing crash handers\n");
     if (airbag_init_fd(2) != 0) {
         perror("airbag_init_fd");
         exit(3);
     }
 
     foo::crashMe(atoi(argv[1]));
+
+    // Let unknown number crash normally (to test deinit)
+    fprintf(stderr, "!!! deinitializing crash handers\n");
+    airbag_deinit();
+    foo::crashMe(0);
 
     exit(4);
 }

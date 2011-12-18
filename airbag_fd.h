@@ -12,10 +12,11 @@
  * state, such as jumping through a bad pointer or a blown stack.  The harvesting and reporting
  * of the crash log is left as an exercise for the reader.
  *
- * Define any of the following, if your platform is missing that functionality:
+ * The common case requires no #defines.  Optional defines:
  * - DISABLE_DLADDR
  * - DISABLE_BACKTRACE_SYMBOLS_FD
  * - DISABLE_BACKTRACE
+ * - EXPERIMENTAL_ARM_UNWIND
  *
  * C++ users are covered; airbag_fd catches SIGABRT.  By default, std::terminate and
  * std::unexpected abort() the program.
@@ -24,6 +25,15 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ * Extremely simple printf-replacement, which is asynchronous-signal safe.
+ * May be used from callback function during crash.  Only supports:
+ * - %s for strings,
+ * - %x for hex-formatted integers (with optional width specifier),
+ * - %u for unsigned integers
+ */
+int airbag_printf(int fd, const char *fmt, ...);
 
 /**
  * Registers crash handlers to output to the file descriptor.

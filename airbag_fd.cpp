@@ -22,10 +22,11 @@
 
 
 /**
+ * @todo expose airbag_symbol; support -mpoke-function-name
  * @todo improve GCC's unwind with bad PC, blown stack, etc
  * @todo clean up sizeof(void*) vs sizeof(int)
  * @todo stop other threads, get their backtraces
- * @todo improve crashes on multiple threads: sa_mask
+ * @todo improve crashes on multiple threads: serialize output
  * @todo test on more architectures: arm
  * @todo function prologue / epilogue on ARM: http://www.mcternan.me.uk/ArmStackUnwinding/
  * @todo heuristic prints from walkStack are printed before the backtrace header
@@ -333,6 +334,9 @@ static const char* demangle(const char *mangled)
     return mangled;
 }
 
+//airbag_symbol()
+//{
+//}
 
 static void printSymbols(void *const *buffer, int *repeat, int size, int fd)
 {
@@ -475,14 +479,41 @@ backward:
         }
         if (load32((uint32_t*)((uint32_t)sp + raOffset), p.fds, (uint32_t*)&ra)) {
             airbag_printf(fd, "Text at RA <- SP[raOffset] %x[%x] is not mapped; terminating backtrace.\n", sp, raOffset);
-            return depth;
+            break;
         }
         sp = (uint32_t*)((uint32_t)sp + stackSize);
     }
     return depth;
-#elif defined(EXPERIMENTAL_ARM_UNWIND) && defined(__arm__)
+#elif defined(__arm__)
+#if defined(EXPERIMENTAL_ARM_UNWIND)
     /* algorithm derived from http://www.mcternan.me.uk/ArmStackUnwinding/ */
     /* TODO */
+#elif defined(__GNUC__)
+    uint32_t *pc, *fp;
+    int assumeLR = 0;
+
+    pc = (uint32_t*)uc->uc_mcontext.pc;
+    fp = (uint32_t*)uc->uc_mcontext.gregs[14];
+
+    int depth = 0;
+    buffer[depth++] = pc;
+
+    while (depth < size && pc) {
+        if (load32(fp, p.fds, (uint32_t*)&pc)) {
+            if (depth == 1 && !assumeLR) {
+                airbag_printf(fd, "Text at %x is not mapped; trying prior frame pointer.\n", MCTX_PC(uc));
+                MCTX_PC(uc) = MCTXREG(uc, 17);  /* LR */
+                assumeLR = 1;
+                continue;
+            } else {
+                airbag_printf(fd, "Text at %x is not mapped; terminating backtrace.\n", fp);
+                break;
+            }
+        }
+        buffer[depth++] = pc;
+    }
+    return depth;
+#endif
 #elif defined(USE_GCC_UNWIND)
     /* Not preferred, because doesn't handle blown stack, etc. */
     static void *handle = dlopen("libgcc_s.so.1", RTLD_LAZY);

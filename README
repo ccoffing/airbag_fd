@@ -18,6 +18,15 @@ Quick start:
 
 Example test:
 
-$ g++ -O -W -Wall -ldl airbag_fd.cpp airbag_fd_test.cpp -o airbag_fd_test
+$ g++ -Os -W -Wall -ldl airbag_fd.cpp airbag_fd_test.cpp -o airbag_fd_test
 $ ./airbag_fd_test.sh
 
+
+x86:
+
+x86_64:
+
+mips:
+
+arm:
+Build your application with -mpoke-function-name and/or -g.

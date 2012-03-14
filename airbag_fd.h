@@ -3,7 +3,7 @@
 
 /**
  * @file  Drop-in crash handlers for POSIX, particularly embedded Linux.
- *
+ * @sa https://github.com/ccoffing/airbag_fd
  * @author Chuck Coffing <clc@alum.mit.edu>
  * @copyright Copyright 2011 Chuck Coffing <clc@alum.mit.edu>, MIT licensed
  *
@@ -16,7 +16,6 @@
  * - DISABLE_DLADDR
  * - DISABLE_BACKTRACE_SYMBOLS_FD
  * - DISABLE_BACKTRACE
- * - EXPERIMENTAL_ARM_UNWIND
  *
  * C++ users are covered; airbag_fd catches SIGABRT.  By default, std::terminate and
  * std::unexpected abort() the program.
@@ -25,6 +24,11 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ * Optional user callback, to print additional state at time of crash (build #, uptime, etc).
+ */
+typedef void (*airbag_user_callback)(int fd);
 
 /**
  * Extremely simple printf-replacement, which is asynchronous-signal safe.
@@ -36,17 +40,23 @@ extern "C" {
 int airbag_printf(int fd, const char *fmt, ...);
 
 /**
+ * Looks up the file name, function name, and offset corresponding to pc.
+ * Writes text representation to fd.
+ */
+void airbag_symbol(int fd, void *pc);
+
+/**
  * Registers crash handlers to output to the file descriptor.
  * @return 0 iff registered; else errno is set.
  */
-int airbag_init_fd(int fd);
+int airbag_init_fd(int fd, airbag_user_callback cb);
 
 /**
  * Registers crash handlers to output to the named file.  The file is created only if and when
  * a crash occurs.
  * @return 0 iff registered; else errno is set.
  */
-int airbag_init_filename(const char *filename);
+int airbag_init_filename(const char *filename, airbag_user_callback cb);
 
 /**
  * Deregisters the crash handlers.

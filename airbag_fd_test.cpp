@@ -91,7 +91,7 @@ int main(int argc, char** argv)
         usage();
 
     fprintf(stderr, "!!! initializing crash handers\n");
-    if (airbag_init_fd(2) != 0) {
+    if (airbag_init_fd(2, 0) != 0) {
         perror("airbag_init_fd");
         exit(3);
     }

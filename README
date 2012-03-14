@@ -2,6 +2,7 @@ airbag_fd
 
 Drop-in crash handlers for POSIX, particularly embedded Linux.
 Copyright 2011 Chuck Coffing <clc@alum.mit.edu>, MIT licensed
+https://github.com/ccoffing/airbag_fd
 
 Dumps registers, backtrace, and instruction stream to a file descriptor.
 Intended to be self-contained and resilient.  Where possible, will detect and

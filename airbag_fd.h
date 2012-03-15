@@ -17,8 +17,9 @@
  * - DISABLE_BACKTRACE_SYMBOLS_FD
  * - DISABLE_BACKTRACE
  *
- * C++ users are covered; airbag_fd catches SIGABRT.  By default, std::terminate and
- * std::unexpected abort() the program.
+ * Should compile as C or C++.  C++ users are covered; airbag_fd catches SIGABRT.  By default,
+ * std::terminate and std::unexpected abort() the program.  Be sure to compile as C++ if you
+ * want name demangling.
  */
 
 #ifdef __cplusplus
@@ -36,6 +37,7 @@ typedef void (*airbag_user_callback)(int fd);
  * - %s for strings,
  * - %x for hex-formatted integers (with optional width specifier),
  * - %u for unsigned integers
+ *@return Number of characters written
  */
 int airbag_printf(int fd, const char *fmt, ...);
 

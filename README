@@ -28,6 +28,7 @@ x86:
 x86_64:
 
 mips:
+Should just work.
 
 arm:
-Build your application with -mpoke-function-name and/or -g.
+Optionally build your application with -mpoke-function-name.

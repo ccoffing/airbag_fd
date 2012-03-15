@@ -91,11 +91,11 @@ static char* s_demangleBuf;
 static size_t s_demangleBufLen;
 #endif
 
-static const size_t ALT_STACK_SIZE = SIGSTKSZ;
+#define ALT_STACK_SIZE (MINSIGSTKSZ+256*sizeof(void*))  /* or let it all hang out: SIGSTKSZ */
 static void* s_altStackSpace;
-static stack_t s_altStack;
 
 static const char unknown[] = "\?\?\?";
+static const char termBt[] = "terminating backtrace";
 
 #define MAX_SIGNALS 32
 static const char *sigNames[MAX_SIGNALS] =
@@ -483,7 +483,7 @@ backward:
         for (addr = ra; !raOffset || !stackSize; --addr) {
             uint32_t v;
             if (load32(addr, &v)) {
-                airbag_printf(fd, "# Text at %x is not mapped; terminating backtrace.\n", addr);
+                airbag_printf(fd, "# Text at %x is not mapped; %s.\n", addr, termBt);
                 return depth;
             }
             switch (v & 0xffff0000) {
@@ -502,7 +502,7 @@ backward:
             }
         }
         if (load32((uint32_t*)((uint32_t)sp + raOffset), (uint32_t*)&ra)) {
-            airbag_printf(fd, "# Text at RA <- SP[raOffset] %x[%x] is not mapped; terminating backtrace.\n", sp, raOffset);
+            airbag_printf(fd, "# Text at RA <- SP[raOffset] %x[%x] is not mapped; %s.\n", sp, raOffset, termBt);
             break;
         }
         sp = (uint32_t*)((uint32_t)sp + stackSize);
@@ -545,7 +545,7 @@ backward:
         for (int i = 0; i < 8192 && !found; ++i) {
             uint32_t instr, instr2;
             if (load32((void*)(pc-i*4), &instr2)) {
-                airbag_printf(fd, "# Instruction at %x is not mapped; terminating backtrace\n", pc-i*4);
+                airbag_printf(fd, "# Instruction at %x is not mapped; %s.\n", pc-i*4, termBt);
                 return depth;
             }
             if ((instr2 & (stmMask | (1<<11))) == (stmBits | (1<<11))) {
@@ -564,8 +564,8 @@ checkStm:
                         if (instr & (1<<regNum)) {
                             uint32_t reg;
                             if (load32((void*)(fp+pushes*4*dir), &reg)) {
-                                airbag_printf(fd, "# Stack at %x is not mapped; terminating backtrace\n",
-                                        fp+pushes*4*dir);
+                                airbag_printf(fd, "# Stack at %x is not mapped; %s.\n",
+                                        fp+pushes*4*dir, termBt);
                                 return depth;
                             }
                             airbag_printf(fd, "# FP%s%2x[%8x]: %8x {%s}\n", dir==1?"+":"-", pushes*4,
@@ -590,7 +590,7 @@ checkStm:
         }
 
         if (! found) {
-            airbag_printf(fd, "# Failed to find prior stack frame; terminating backtrace.\n");
+            airbag_printf(fd, "# Failed to find prior stack frame; %s.\n", termBt);
             break;
         } else {
             if (buffer[depth-1] == (void*)pc)
@@ -606,7 +606,7 @@ checkStm:
 #elif defined(USE_GCC_UNWIND)
     /* Not preferred, because doesn't handle blown stack, etc. */
     static Unwind_Backtrace_T _unwind_Backtrace;
-    static void *handle = 0;
+    static void *handle;
     if (!handle)
         handle = dlopen("libgcc_s.so.1", RTLD_LAZY);
 
@@ -782,7 +782,7 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
     airbag_printf(fd, "\n");
 
     {
-        const int size = 64;
+        const int size = 32;
         void* buffer[size];
         int repeat[size];
         airbag_printf(fd, "> Backtrace:\n");
@@ -872,13 +872,14 @@ static int initCrashHandlers()
 #endif
 
     if (! s_altStackSpace) {
+        stack_t altStack;
         s_altStackSpace = (void*)malloc(ALT_STACK_SIZE);
         if (! s_altStackSpace)
             return -1;
-        s_altStack.ss_sp = s_altStackSpace;
-        s_altStack.ss_flags = 0;
-        s_altStack.ss_size = ALT_STACK_SIZE;
-        if (sigaltstack(&s_altStack, NULL) != 0) {
+        altStack.ss_sp = s_altStackSpace;
+        altStack.ss_flags = 0;
+        altStack.ss_size = ALT_STACK_SIZE;
+        if (sigaltstack(&altStack, NULL) != 0) {
             free(s_altStackSpace);
             s_altStackSpace = 0;
             return -1;
@@ -926,8 +927,9 @@ static void deinitCrashHandlers()
     }
 #endif
     if (s_altStackSpace) {
-        s_altStack.ss_flags = SS_DISABLE;
-        sigaltstack(&s_altStack, NULL);
+        stack_t altStack;
+        altStack.ss_flags = SS_DISABLE;
+        sigaltstack(&altStack, NULL);
         free(s_altStackSpace);
         s_altStackSpace = 0;
     }

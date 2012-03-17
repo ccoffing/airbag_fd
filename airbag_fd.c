@@ -33,6 +33,7 @@
  * @todo clean up on normal exit or crash, so valgrind doesn't show leaked memory?
  * @todo better symbols on x86
  * @todo expose airbag_walkstack
+ * @todo report crashing thread name:  prctl(PR_GET_NAME)
  */
 
 #ifndef _BSD_SOURCE
@@ -235,8 +236,10 @@ static uint8_t load8(const void *_p, uint8_t *v)
     int r;
     const uint8_t *p = (const uint8_t *)_p;
 
-    if (fds[0] == -1)
-        pipe(fds); /* even on failure, degrades gracefully if memory is readable */
+    if (fds[0] == -1) {
+        int r = pipe(fds);
+        (void)r; /* even on failure, degrades gracefully if memory is readable */
+    }
 
     if (v)
         *v = 0;

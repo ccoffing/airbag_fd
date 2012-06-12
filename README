@@ -19,7 +19,7 @@ Quick start:
 
 Example test:
 
-$ g++ -Os -W -Wall -ldl airbag_fd.c airbag_fd_test.c -o airbag_fd_test
+$ g++ -Os -Wall -Wextra -ldl airbag_fd.c airbag_fd_test.c -o airbag_fd_test
 $ ./airbag_fd_test.sh
 
 

@@ -22,6 +22,7 @@
 
 
 /**
+ * @todo arm: -mpoke-function-name
  * @todo arm: thumb mode
  * @todo arm: http://www.mcternan.me.uk/ArmStackUnwinding/
  * @todo improve GCC's unwind with bad PC, blown stack, etc
@@ -33,7 +34,6 @@
  * @todo clean up on normal exit or crash, so valgrind doesn't show leaked memory?
  * @todo better symbols on x86
  * @todo expose airbag_walkstack
- * @todo report crashing thread name:  prctl(PR_GET_NAME)
  */
 
 #ifndef _BSD_SOURCE
@@ -57,11 +57,14 @@
 #include <stdio.h>
 #include <dlfcn.h>
 #include <arpa/inet.h>  /* for htonl */
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 #if !defined(DISABLE_BACKTRACE)
 #include <execinfo.h>
 #endif
 
-#if defined(__GNUC__) && defined(__cplusplus)
+#if defined(__cplusplus)
 #include <cxxabi.h>
 /*
  * Theoretically might want to disable this, because __cxa_demangle calls malloc/free, which could
@@ -70,7 +73,7 @@
  */
 #define USE_GCC_DEMANGLE
 #endif
-#ifdef __GNUC__
+#if defined(__GNUC__) && !defined(__clang__)
 #include <unwind.h>
 #define USE_GCC_UNWIND
 #endif
@@ -95,6 +98,8 @@ static size_t s_demangleBufLen;
 #define ALT_STACK_SIZE (MINSIGSTKSZ+256*sizeof(void*))  /* or let it all hang out: SIGSTKSZ */
 static void* s_altStackSpace;
 
+static const char comment[] = "# ";
+static const char section[] = "=== ";
 static const char unknown[] = "\?\?\?";
 static const char termBt[] = "terminating backtrace";
 
@@ -279,7 +284,6 @@ static uint32_t load32(const void *_p, uint32_t *_v)
     return r;
 }
 
-
 static int airbag_write(int fd, const char* buf, size_t len)
 {
     while (write(fd, buf, len) == -1 && errno == EINTR)
@@ -446,18 +450,18 @@ static int airbag_walkstack(int fd, void **buffer, int *repeat, int size, uconte
     for (addr = pc; !raOffset | !stackSize; --addr) {
         uint32_t v;
         if (load32(addr, &v)) {
-            airbag_printf(fd, "# Text at %x is not mapped; trying prior frame pointer.\n", addr);
+            airbag_printf(fd, "%sText at %x is not mapped; trying prior frame pointer.\n", comment, addr);
             uc->uc_mcontext.pc = (uint32_t)ra;
             goto backward;
         }
         switch (v & 0xffff0000) {
             case 0x27bd0000:  /* addiu   sp,sp,??? */
                 stackSize = abs((short)(v & 0xffff));
-                airbag_printf(fd, "# [%08x]: stack size %u\n", addr, stackSize);
+                airbag_printf(fd, "%s[%08x]: stack size %u\n", comment, addr, stackSize);
                 break;
             case 0xafbf0000:  /* sw      ra,???(sp) */
                 raOffset = (v & 0xffff);
-                airbag_printf(fd, "# [%08x]: ra offset %u\n", addr, raOffset);
+                airbag_printf(fd, "%s[%08x]: ra offset %u\n", comment, addr, raOffset);
                 break;
             case 0x3c1c0000:  /* lui     gp,??? */
                 goto out;
@@ -469,7 +473,7 @@ out:
     if (raOffset) {
         uint32_t *newRa;
         if (load32((uint32_t*)((uint32_t)sp + raOffset), (uint32_t*)&newRa))
-            airbag_printf(fd, "# Text at RA <- SP[raOffset] %x[%x] is not mapped; assuming blown stack.\n", sp, raOffset);
+            airbag_printf(fd, "%sText at RA <- SP[raOffset] %x[%x] is not mapped; assuming blown stack.\n", comment, sp, raOffset);
         else
             ra = newRa;
     }
@@ -486,17 +490,17 @@ backward:
         for (addr = ra; !raOffset || !stackSize; --addr) {
             uint32_t v;
             if (load32(addr, &v)) {
-                airbag_printf(fd, "# Text at %x is not mapped; %s.\n", addr, termBt);
+                airbag_printf(fd, "%sText at %x is not mapped; %s.\n", comment, addr, termBt);
                 return depth;
             }
             switch (v & 0xffff0000) {
                 case 0x27bd0000:  /* addiu   sp,sp,??? */
                     stackSize = abs((short)(v & 0xffff));
-                    airbag_printf(fd, "# [%08x]: stack size %u\n", addr, stackSize);
+                    airbag_printf(fd, "%s[%08x]: stack size %u\n", comment, addr, stackSize);
                     break;
                 case 0xafbf0000:  /* sw      ra,???(sp) */
                     raOffset = (v & 0xffff);
-                    airbag_printf(fd, "# [%08x]: ra offset %u\n", addr, raOffset);
+                    airbag_printf(fd, "%s[%08x]: ra offset %u\n", comment, addr, raOffset);
                     break;
                 case 0x3c1c0000:  /* lui     gp,??? */
                     return depth + 1;
@@ -505,7 +509,7 @@ backward:
             }
         }
         if (load32((uint32_t*)((uint32_t)sp + raOffset), (uint32_t*)&ra)) {
-            airbag_printf(fd, "# Text at RA <- SP[raOffset] %x[%x] is not mapped; %s.\n", sp, raOffset, termBt);
+            airbag_printf(fd, "%sText at RA <- SP[raOffset] %x[%x] is not mapped; %s.\n", comment, sp, raOffset, termBt);
             break;
         }
         sp = (uint32_t*)((uint32_t)sp + stackSize);
@@ -518,12 +522,12 @@ backward:
     int depth = 0;
 
     buffer[depth++] = (void*)pc;
-    airbag_printf(fd, "# ");
+    airbag_printf(fd, "%s", comment);
     airbag_symbol(fd, (void*)pc);
     airbag_printf(fd, "\n");
 
     if (pc&3 || load32((void*)pc, NULL)) {
-        airbag_printf(fd, "# Called through bad function pointer; assuming PC <- LR.\n");
+        airbag_printf(fd, "%sCalled through bad function pointer; assuming PC <- LR.\n", comment);
         pc = MCTX_PC(uc) = lr;
     }
 
@@ -535,7 +539,7 @@ backward:
      *  - Leaf functions might not push LR.
      */
     while (depth < size) {
-        airbag_printf(fd, "# Searching frame %u (FP=%x, PC=%x)\n", depth-1, fp, pc);
+        airbag_printf(fd, "%sSearching frame %u (FP=%x, PC=%x)\n", comment, depth-1, fp, pc);
         /*
          * CondOp-PUSWLRn--Register-list---
          * 1110100???101101????????????????
@@ -548,7 +552,7 @@ backward:
         for (int i = 0; i < 8192 && !found; ++i) {
             uint32_t instr, instr2;
             if (load32((void*)(pc-i*4), &instr2)) {
-                airbag_printf(fd, "# Instruction at %x is not mapped; %s.\n", pc-i*4, termBt);
+                airbag_printf(fd, "%sInstruction at %x is not mapped; %s.\n", comment, pc-i*4, termBt);
                 return depth;
             }
             if ((instr2 & (stmMask | (1<<11))) == (stmBits | (1<<11))) {
@@ -561,17 +565,17 @@ backward:
 checkStm:
                     dir = (instr & (1<<23)) ? 1 : -1;  /* U bit: increment or decrement? */
                     pre = (instr & (1<<24)) ? 1 : 0;  /* P bit: pre  TODO */
-                    airbag_printf(fd, "# PC-%2x[%8x]: %8x stm%s%s sp!\n", i*4, pc-i*4, instr,
+                    airbag_printf(fd, "%sPC-%2x[%8x]: %8x stm%s%s sp!\n", comment, i*4, pc-i*4, instr,
                             pre==1?"f":"e", dir==1?"a":"d");
                     for (int regNum = 15; regNum >= 0; --regNum) {
                         if (instr & (1<<regNum)) {
                             uint32_t reg;
                             if (load32((void*)(fp+pushes*4*dir), &reg)) {
-                                airbag_printf(fd, "# Stack at %x is not mapped; %s.\n",
+                                airbag_printf(fd, "%sStack at %x is not mapped; %s.\n", comment,
                                         fp+pushes*4*dir, termBt);
                                 return depth;
                             }
-                            airbag_printf(fd, "# FP%s%2x[%8x]: %8x {%s}\n", dir==1?"+":"-", pushes*4,
+                            airbag_printf(fd, "%sFP%s%2x[%8x]: %8x {%s}\n", dir==1?"+":"-", comment, pushes*4,
                                     fp+pushes*4*dir, reg, mctxRegNames[gregOffset + regNum]);
                             pushes++;
                             if (regNum == 11)
@@ -593,14 +597,14 @@ checkStm:
         }
 
         if (! found) {
-            airbag_printf(fd, "# Failed to find prior stack frame; %s.\n", termBt);
+            airbag_printf(fd, "%sFailed to find prior stack frame; %s.\n", comment, termBt);
             break;
         } else {
             if (buffer[depth-1] == (void*)pc)
                 repeat[depth-1] ++;
             else
                 buffer[depth++] = (void*)pc;
-            airbag_printf(fd, "# ");
+            airbag_printf(fd, "%s", comment);
             airbag_symbol(fd, (void*)pc);
             airbag_printf(fd, "\n");
         }
@@ -621,22 +625,25 @@ checkStm:
         if (_unwind_Backtrace && _unwind_GetIP) {
             struct trace_arg arg = { buffer, -1, size, uc };
             if (load8((void*)(MCTX_PC(uc)), NULL)) {
-                airbag_printf(fd, "# Text at %x is not mapped; trying prior frame pointer.\n", MCTX_PC(uc));
+                airbag_printf(fd, "%sText at %x is not mapped; trying prior frame pointer.\n", comment, MCTX_PC(uc));
 #if defined(__mips__)
                 MCTX_PC(uc) = MCTXREG(uc, 31);  /* RA */
 #elif defined(__arm__)
                 MCTX_PC(uc) = MCTXREG(uc, 17);  /* LR */
 #elif defined(__i386__)
+                /* TODO heuristic for -fomit-frame-pointer? */
                 uint8_t* fp = (uint8_t*)MCTXREG(uc, 6) + 4;
                 uint32_t eip;
                 if (load32((void*)fp, &eip)) {
-                    airbag_printf(fd, "# Text at %x is not mapped; cannot get backtrace.\n", fp);
+                    airbag_printf(fd, "%sText at %x is not mapped; cannot get backtrace.\n", comment, fp);
                     size = 0;
                 } else {
                     MCTX_PC(uc) = eip;
                 }
+#elif defined(__x86_64__)
+                /* TODO x84_64 abi encourages not saving fp */
+                size = 0;
 #else
-                /* TODO  x86_64, ... */
                 size = 0;
 #endif
             }
@@ -767,7 +774,7 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
         airbag_printf(fd, "Errno %u: %s.\n", si->si_errno, sys_errlist[si->si_errno]);
 #endif
 
-    airbag_printf(fd, "> Context:\n");
+    airbag_printf(fd, "%sContext:\n", section);
     int width = 0;
     int i;
     for (i = 0; i < NMCTXREGS; ++i) {
@@ -783,12 +790,21 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
         width += airbag_printf(fd, "%s:%x", mctxRegNames[i], MCTXREG(uc, i));
     }
     airbag_printf(fd, "\n");
+#ifdef __linux__
+    /* set your thread name with prctl(PR_SET_NAME, (unsigned long)name); */
+    {
+        char name[17];
+        prctl(PR_GET_NAME, name);
+        name[sizeof(name)-1] = 0;
+        airbag_printf(fd, "Thread name: %s\n", name);
+    }
+#endif
 
     {
         const int size = 32;
         void* buffer[size];
         int repeat[size];
-        airbag_printf(fd, "> Backtrace:\n");
+        airbag_printf(fd, "%sBacktrace:\n", section);
         int nptrs = airbag_walkstack(fd, buffer, repeat, size, uc);
         for (i = 0; i < nptrs; ++i) {
             airbag_symbol(fd, buffer[i]);
@@ -820,7 +836,7 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
     const uint32_t* endPc = (uint32_t*)((uint8_t*)startPc + bytes);
     const uint32_t* addr;
 #endif
-    airbag_printf(fd, "> Code:\n");
+    airbag_printf(fd, "%sCode:\n", section);
     for (addr = startPc; addr < endPc; ++addr) {
         if (addr != startPc) {
             if (width > 70) {

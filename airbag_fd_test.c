@@ -72,16 +72,11 @@ extern int crashFn1(int how)
     return crashFn2(how);
 }
 
-namespace foo
-{
-
 int crashMe(int how)
 {
     if (how < 0)
         fprintf(stderr, "!!! blowing the stack\n");
     return crashFn1(how);
-}
-
 }
 
 void usage()
@@ -102,12 +97,12 @@ int main(int argc, char** argv)
         exit(3);
     }
 
-    foo::crashMe(atoi(argv[1]));
+    crashMe(atoi(argv[1]));
 
     // Let unknown number crash normally (to test deinit)
     fprintf(stderr, "!!! deinitializing crash handlers\n");
     airbag_deinit();
-    foo::crashMe(0);
+    crashMe(0);
 
     exit(4);
 }

@@ -20,6 +20,19 @@
  * Should compile as C or C++.  C++ users are covered; airbag_fd catches SIGABRT.  By default,
  * std::terminate and std::unexpected abort() the program.  Be sure to compile as C++ if you
  * want name demangling.
+ *
+ * @todo arm: -mpoke-function-name
+ * @todo arm: thumb mode
+ * @todo arm: http://www.mcternan.me.uk/ArmStackUnwinding/
+ * @todo improve GCC's unwind with bad PC, blown stack, etc
+ * @todo stop other threads, get their backtraces
+ * @todo improve crashes on multiple threads: serialize output
+ * @todo if failed to get any backtrace, scan /proc/pid/maps for library offsets
+ * @todo test on more OSs: bsd
+ * @todo better symbols on x86-64
+ * @todo expose airbag_walkstack
+ */
+
  */
 
 #ifdef __cplusplus

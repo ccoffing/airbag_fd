@@ -99,10 +99,9 @@ int main(int argc, char** argv)
 
     crashMe(atoi(argv[1]));
 
-    // Let unknown number crash normally (to test deinit)
+    // Let unknown number exit normally (to test deinit)
     fprintf(stderr, "!!! deinitializing crash handlers\n");
     airbag_deinit();
-    crashMe(0);
 
     exit(4);
 }

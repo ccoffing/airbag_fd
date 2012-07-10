@@ -21,21 +21,6 @@
  */
 
 
-/**
- * @todo arm: -mpoke-function-name
- * @todo arm: thumb mode
- * @todo arm: http://www.mcternan.me.uk/ArmStackUnwinding/
- * @todo improve GCC's unwind with bad PC, blown stack, etc
- * @todo clean up sizeof(void*) vs sizeof(int)
- * @todo stop other threads, get their backtraces
- * @todo improve crashes on multiple threads: serialize output
- * @todo if failed to get any backtrace, scan /proc/pid/maps for library offsets
- * @todo test on more OSs: bsd
- * @todo clean up on normal exit or crash, so valgrind doesn't show leaked memory?
- * @todo better symbols on x86
- * @todo expose airbag_walkstack
- */
-
 #ifndef _BSD_SOURCE
 #define _BSD_SOURCE
 #endif
@@ -947,7 +932,9 @@ static void deinitCrashHandlers()
 #endif
     if (s_altStackSpace) {
         stack_t altStack;
+        altStack.ss_sp = 0;
         altStack.ss_flags = SS_DISABLE;
+        altStack.ss_size = 0;
         sigaltstack(&altStack, NULL);
         free(s_altStackSpace);
         s_altStackSpace = 0;

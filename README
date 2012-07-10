@@ -23,12 +23,14 @@ $ g++ -Os -Wall -Wextra -ldl airbag_fd.c airbag_fd_test.c -o airbag_fd_test
 $ ./airbag_fd_test.sh
 
 
+Notes:
+
 x86:
 
 x86_64:
+No heuristics for trashed stack.
 
 mips:
-Should just work.
 
 arm:
 Optionally build your application with -mpoke-function-name.

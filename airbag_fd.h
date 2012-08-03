@@ -33,8 +33,6 @@
  * @todo expose airbag_walkstack
  */
 
- */
-
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -291,8 +291,8 @@ int airbag_printf(int fd, const char *fmt, ...)
         size_t len = p ? (size_t)(p-fmt) : strlen(fmt);
         chars += airbag_write(fd, fmt, len);
         if (p) {
-            ++p;
             int width = -1;
+            ++p;
             while (*p >= '0' && *p <= '9') {
                 width *= (width < 0) ? 0 : 10;
                 width += (*p-'0');
@@ -524,7 +524,6 @@ backward:
      *  - Leaf functions might not push LR.
      */
     while (depth < size) {
-        airbag_printf(fd, "%sSearching frame %u (FP=%x, PC=%x)\n", comment, depth-1, fp, pc);
         /*
          * CondOp-PUSWLRn--Register-list---
          * 1110100???101101????????????????
@@ -534,7 +533,9 @@ backward:
         const uint32_t stmBits = 0xe82d0000;
         const uint32_t stmMask = 0xfe3f0000;
         int found = 0;
-        for (int i = 0; i < 8192 && !found; ++i) {
+        int i;
+        airbag_printf(fd, "%sSearching frame %u (FP=%x, PC=%x)\n", comment, depth-1, fp, pc);
+        for (i = 0; i < 8192 && !found; ++i) {
             uint32_t instr, instr2;
             if (load32((void*)(pc-i*4), &instr2)) {
                 airbag_printf(fd, "%sInstruction at %x is not mapped; %s.\n", comment, pc-i*4, termBt);
@@ -547,12 +548,13 @@ backward:
                 found = 1;
                 i++;
                 if (load32((void*)(pc-i*4), &instr) == 0 && (instr & stmMask) == stmBits) {
+                    int regNum;
 checkStm:
                     dir = (instr & (1<<23)) ? 1 : -1;  /* U bit: increment or decrement? */
                     pre = (instr & (1<<24)) ? 1 : 0;  /* P bit: pre  TODO */
                     airbag_printf(fd, "%sPC-%2x[%8x]: %8x stm%s%s sp!\n", comment, i*4, pc-i*4, instr,
                             pre==1?"f":"e", dir==1?"a":"d");
-                    for (int regNum = 15; regNum >= 0; --regNum) {
+                    for (regNum = 15; regNum >= 0; --regNum) {
                         if (instr & (1<<regNum)) {
                             uint32_t reg;
                             if (load32((void*)(fp+pushes*4*dir), &reg)) {
@@ -844,7 +846,8 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
 #else
         uint32_t w;
         uint32_t invalid = load32(addr, &w);
-        for (int i = 3; i >= 0; --i) {
+        int i;
+        for (i = 3; i >= 0; --i) {
             int shift = i*8;
             if ((invalid>>shift) & 0xff)
                 airbag_printf(fd, "??");
@@ -911,9 +914,10 @@ static int initCrashHandlers()
 static void deinitCrashHandlers()
 {
     sigset_t sigset;
+    struct sigaction sa;
+
     sigemptyset(&sigset);
 
-    struct sigaction sa;
     sa.sa_handler = SIG_DFL;
     sa.sa_mask = sigset;
     sa.sa_flags = 0;

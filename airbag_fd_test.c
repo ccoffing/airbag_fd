@@ -37,8 +37,8 @@ extern int crashFn3(int how)
             break;
         }
         case 2: {
-            fprintf(stderr, "!!! jumping through bad pointer\n");
             CrashPtrT f = (CrashPtrT)0x1;
+            fprintf(stderr, "!!! jumping through bad pointer\n");
             f();
             break;
         }
@@ -52,9 +52,9 @@ extern int crashFn3(int how)
             break;
         }
         case 4: {
-            fprintf(stderr, "!!! division by 0\n");
             volatile int n = 1;
             volatile int d = 0;
+            fprintf(stderr, "!!! division by 0\n");
             fprintf(stderr, "%d\n", n/d);
             break;
         }
@@ -99,7 +99,7 @@ int main(int argc, char** argv)
 
     crashMe(atoi(argv[1]));
 
-    // Let unknown number exit normally (to test deinit)
+    /* Let unknown number exit normally (to test deinit) */
     fprintf(stderr, "!!! deinitializing crash handlers\n");
     airbag_deinit();
 

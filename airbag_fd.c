@@ -227,7 +227,7 @@ static uint8_t load8(const void *_p, uint8_t *v)
     const uint8_t *p = (const uint8_t *)_p;
 
     if (fds[0] == -1) {
-        int r = pipe(fds);
+        r = pipe(fds);
         (void)r; /* even on failure, degrades gracefully if memory is readable */
     }
 

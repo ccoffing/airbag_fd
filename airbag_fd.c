@@ -370,18 +370,20 @@ void airbag_symbol(int fd, void *pc)
 #if !defined(DISABLE_DLADDR)
     Dl_info info;
     if (dladdr(pc, &info)) {
-        int offset = (ptrdiff_t)pc - (ptrdiff_t)info.dli_saddr;
-        airbag_printf(fd, "%s(%s+0x%x)[%x]", info.dli_fname, demangle(info.dli_sname), offset, pc);
+        int offset;
+        if (info.dli_saddr)
+            offset = (ptrdiff_t)pc - (ptrdiff_t)info.dli_saddr;
+        else {
+            /* no symbol found?  offset from start of shared object */
+            info.dli_sname = "";
+            offset = (ptrdiff_t)pc - (ptrdiff_t)info.dli_fbase;
+        }
+        airbag_printf(fd, "%s[%x](%s+%x)[%x]", info.dli_fname, info.dli_fbase, demangle(info.dli_sname), offset, pc);
         printed = 1;
     }
 #endif
-#if defined(__arm__)
     if (!printed) {
-        /* TODO: -mpoke-function-name */
-    }
-#endif
-    if (!printed) {
-        airbag_printf(fd, "%s(%s)[%x]", unknown, unknown, pc);
+        airbag_printf(fd, "%s(+0)[%x]", unknown, pc);
     }
 }
 
@@ -432,7 +434,7 @@ static int airbag_walkstack(int fd, void **buffer, int *repeat, int size, uconte
 
     /* Scanning to find the size of the current stack frame */
     raOffset = stackSize = 0;
-    for (addr = pc; !raOffset | !stackSize; --addr) {
+    for (addr = pc; !raOffset || !stackSize; --addr) {
         uint32_t v;
         if (load32(addr, &v)) {
             airbag_printf(fd, "%sText at %x is not mapped; trying prior frame pointer.\n", comment, addr);
@@ -535,6 +537,32 @@ backward:
         int found = 0;
         int i;
         airbag_printf(fd, "%sSearching frame %u (FP=%x, PC=%x)\n", comment, depth-1, fp, pc);
+#if 0
+        /* Preliminary support for -mpoke-function-name.
+         * TODO: move this into airbag_symbol, load a word at a time, -12 vs -16, etc.
+         * TODO: what if lr&3 or priorPc&3
+         */
+        {
+            char fn[257];
+            uint32_t pfpc, name, len;
+            if (load32((void*)fp, &pfpc) == 0) {
+                airbag_printf(fd, "%spfpc %x\n", comment, pfpc);
+                if (load32((void*)(pfpc - 12), &len) == 0 && (len&0xffffff00) == 0xff000000) {
+                    uint32_t offset;
+                    len &= 0xff;
+                    name = name - 12 - len;
+                    for (offset = 0; offset < len; ++offset) {
+                        uint8_t c;
+                        if (load8((void*)(name + offset), &c))
+                            break;
+                        fn[offset] = c;
+                    }
+                    fn[offset] = 0;
+                    airbag_printf(fd, "%spoke-function-name %s\n", comment, fn);
+                }
+            }
+        }
+#endif
         for (i = 0; i < 8192 && !found; ++i) {
             uint32_t instr, instr2;
             if (load32((void*)(pc-i*4), &instr2)) {
@@ -542,17 +570,17 @@ backward:
                 return depth;
             }
             if ((instr2 & (stmMask | (1<<11))) == (stmBits | (1<<11))) {
-                int pushes = 0, dir, pre;
                 uint32_t priorPc = lr;  /* If LR was pushed, will find and use that.  For now assume leaf function. */
                 uint32_t priorFp;
                 found = 1;
                 i++;
                 if (load32((void*)(pc-i*4), &instr) == 0 && (instr & stmMask) == stmBits) {
-                    int regNum;
+                    int pushes, dir, pre, regNum;
+                    pushes = 0;
 checkStm:
                     dir = (instr & (1<<23)) ? 1 : -1;  /* U bit: increment or decrement? */
                     pre = (instr & (1<<24)) ? 1 : 0;  /* P bit: pre  TODO */
-                    airbag_printf(fd, "%sPC-%2x[%8x]: %8x stm%s%s sp!\n", comment, i*4, pc-i*4, instr,
+                    airbag_printf(fd, "%sPC-%02x[%8x]: %8x stm%s%s sp!\n", comment, i*4, pc-i*4, instr,
                             pre==1?"f":"e", dir==1?"a":"d");
                     for (regNum = 15; regNum >= 0; --regNum) {
                         if (instr & (1<<regNum)) {
@@ -562,7 +590,7 @@ checkStm:
                                         fp+pushes*4*dir, termBt);
                                 return depth;
                             }
-                            airbag_printf(fd, "%sFP%s%2x[%8x]: %8x {%s}\n", dir==1?"+":"-", comment, pushes*4,
+                            airbag_printf(fd, "%sFP%s%02x[%8x]: %8x {%s}\n", comment, dir==1?"+":"-", pushes*4,
                                     fp+pushes*4*dir, reg, mctxRegNames[gregOffset + regNum]);
                             pushes++;
                             if (regNum == 11)
@@ -643,14 +671,16 @@ checkStm:
             return arg.cnt != -1 ? arg.cnt : 0;
         }
     }
+    return 0;
 #elif !defined(DISABLE_BACKTRACE)
     /*
      * Not preferred, because no way to explicitly start at failing PC, doesn't handle
      * bad PC, doesn't handle blown stack, etc.
      */
     return backtrace(buffer, size);
-#endif
+#else
     return 0;
+#endif
 }
 
 
@@ -825,16 +855,14 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
 #endif
     airbag_printf(fd, "%sCode:\n", section);
     for (addr = startPc; addr < endPc; ++addr) {
-        if (addr != startPc) {
-            if (width > 70) {
-                airbag_printf(fd, "\n");
-                width = 0;
-            } else
-                width += airbag_printf(fd, " ");
+        if (width > 70) {
+            airbag_printf(fd, "\n");
+            width = 0;
         }
         if (width == 0) {
             airbag_printf(fd, "%x: ", addr);
         }
+        width += airbag_printf(fd, (const uint8_t*)addr == pc ? ">" : " ");
 #if defined(__x86_64__) || defined(__i386__)
         uint8_t b;
         uint8_t invalid = load8(addr, &b);
@@ -895,6 +923,11 @@ static int initCrashHandlers()
 
     sigset_t sigset;
     sigemptyset(&sigset);
+    sigaddset(&sigset, SIGABRT);
+    sigaddset(&sigset, SIGBUS);
+    sigaddset(&sigset, SIGILL);
+    sigaddset(&sigset, SIGSEGV);
+    sigaddset(&sigset, SIGFPE);
 
     struct sigaction sa;
     sa.sa_sigaction = sigHandler;
@@ -913,9 +946,8 @@ static int initCrashHandlers()
 
 static void deinitCrashHandlers()
 {
-    sigset_t sigset;
     struct sigaction sa;
-
+    sigset_t sigset;
     sigemptyset(&sigset);
 
     sa.sa_handler = SIG_DFL;

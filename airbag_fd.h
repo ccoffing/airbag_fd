@@ -14,14 +14,12 @@
  *
  * The common case requires no #defines.  Optional defines:
  * - DISABLE_DLADDR
- * - DISABLE_BACKTRACE_SYMBOLS_FD
  * - DISABLE_BACKTRACE
  *
  * Should compile as C or C++.  C++ users are covered; airbag_fd catches SIGABRT.  By default,
  * std::terminate and std::unexpected abort() the program.  Be sure to compile as C++ if you
  * want name demangling.
  *
- * @todo arm: -mpoke-function-name
  * @todo arm: thumb mode
  * @todo arm: http://www.mcternan.me.uk/ArmStackUnwinding/
  * @todo improve GCC's unwind with bad PC, blown stack, etc
@@ -48,7 +46,7 @@ typedef void (*airbag_user_callback)(int fd);
  * - %s for strings,
  * - %x for hex-formatted integers (with optional width specifier),
  * - %u for unsigned integers
- *@return Number of characters written
+ * @return Number of characters written
  */
 int airbag_printf(int fd, const char *fmt, ...);
 

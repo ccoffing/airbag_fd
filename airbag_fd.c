@@ -896,7 +896,6 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
 #else
         uint32_t w;
         uint32_t invalid = load32(addr, &w);
-        int i;
         for (i = 3; i >= 0; --i) {
             int shift = i*8;
             if ((invalid>>shift) & 0xff)
@@ -943,17 +942,17 @@ static int initCrashHandlers()
         }
     }
 
-    sigset_t sigset;
-    sigemptyset(&sigset);
-    sigaddset(&sigset, SIGABRT);
-    sigaddset(&sigset, SIGBUS);
-    sigaddset(&sigset, SIGILL);
-    sigaddset(&sigset, SIGSEGV);
-    sigaddset(&sigset, SIGFPE);
+    sigset_t mysigset;
+    sigemptyset(&mysigset);
+    sigaddset(&mysigset, SIGABRT);
+    sigaddset(&mysigset, SIGBUS);
+    sigaddset(&mysigset, SIGILL);
+    sigaddset(&mysigset, SIGSEGV);
+    sigaddset(&mysigset, SIGFPE);
 
     struct sigaction sa;
     sa.sa_sigaction = sigHandler;
-    sa.sa_mask = sigset;
+    sa.sa_mask = mysigset;
     sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
 
     sigaction(SIGABRT, &sa, 0);
@@ -969,11 +968,11 @@ static int initCrashHandlers()
 static void deinitCrashHandlers()
 {
     struct sigaction sa;
-    sigset_t sigset;
-    sigemptyset(&sigset);
+    sigset_t mysigset;
+    sigemptyset(&mysigset);
 
     sa.sa_handler = SIG_DFL;
-    sa.sa_mask = sigset;
+    sa.sa_mask = mysigset;
     sa.sa_flags = 0;
 
     sigaction(SIGABRT, &sa, 0);

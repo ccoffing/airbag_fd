@@ -20,6 +20,9 @@
  * SOFTWARE.
  */
 
+#ifdef __ANDROID__
+#define DISABLE_BACKTRACE
+#endif
 
 #ifndef _BSD_SOURCE
 #define _BSD_SOURCE
@@ -47,6 +50,18 @@
 #endif
 #if !defined(DISABLE_BACKTRACE)
 #include <execinfo.h>
+#endif
+
+#ifdef __ANDROID__
+#include <asm/sigcontext.h>  /* for sigcontext */
+#include <asm/signal.h>  /* for stack_t */
+typedef struct ucontext {
+    unsigned long uc_flags;
+    struct ucontext *uc_link;
+    stack_t uc_stack;
+    struct sigcontext uc_mcontext;
+    unsigned long uc_sigmask;
+} ucontext_t;
 #endif
 
 #if defined(__cplusplus)
@@ -833,7 +848,7 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
     /* set your thread name with prctl(PR_SET_NAME, (unsigned long)name); */
     {
         char name[17];
-        prctl(PR_GET_NAME, name);
+        prctl(PR_GET_NAME, (unsigned long)name, 0, 0, 0);
         name[sizeof(name)-1] = 0;
         airbag_printf(fd, "Thread name: %s\n", name);
     }

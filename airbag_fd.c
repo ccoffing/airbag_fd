@@ -664,12 +664,12 @@ checkStm:
     return depth;
 #elif defined(USE_GCC_UNWIND)
     /* Not preferred, because doesn't handle blown stack, etc. */
-    static Unwind_Backtrace_T _unwind_Backtrace;
     static void *handle;
     if (!handle)
         handle = dlopen("libgcc_s.so.1", RTLD_LAZY);
 
     if (handle) {
+        static Unwind_Backtrace_T _unwind_Backtrace;
         if (!_unwind_Backtrace)
             _unwind_Backtrace = (Unwind_Backtrace_T)dlsym(handle, "_Unwind_Backtrace");
         if (!_unwind_GetIP)

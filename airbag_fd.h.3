@@ -1,0 +1,141 @@
+.TH "airbag_fd.h" 3 "Fri Jun 21 2013" "Version 1.0" "airbag-fd" \" -*- nroff -*-
+.ad l
+.nh
+.SH NAME
+airbag_fd.h \- 
+.PP
+Drop-in crash handlers for POSIX, particularly embedded Linux\&.  
+
+.SH SYNOPSIS
+.br
+.PP
+.SS "Typedefs"
+
+.in +1c
+.ti -1c
+.RI "typedef void(* \fBairbag_user_callback\fP )(int fd)"
+.br
+.in -1c
+.SS "Functions"
+
+.in +1c
+.ti -1c
+.RI "int \fBairbag_init_fd\fP (int fd, \fBairbag_user_callback\fP cb)"
+.br
+.ti -1c
+.RI "int \fBairbag_init_filename\fP (const char *filename, \fBairbag_user_callback\fP cb)"
+.br
+.ti -1c
+.RI "int \fBairbag_printf\fP (int fd, const char *fmt,\&.\&.\&.)"
+.br
+.ti -1c
+.RI "void \fBairbag_symbol\fP (int fd, void *pc)"
+.br
+.ti -1c
+.RI "void \fBairbag_deinit\fP ()"
+.br
+.in -1c
+.SH "Detailed Description"
+.PP 
+Drop-in crash handlers for POSIX, particularly embedded Linux\&. 
+
+Dumps registers, backtrace, and instruction stream to a file descriptor\&. Intended to be self-contained and resilient\&. Where possible, will detect and intelligently handle corrupt state, such as jumping through a bad pointer or a blown stack\&. The harvesting and reporting of the crash log is left as an exercise for the reader\&.
+.PP
+The common case requires no \fC#defines\fP\&. Optional defines:
+.IP "\(bu" 2
+DISABLE_DLADDR
+.IP "\(bu" 2
+DISABLE_BACKTRACE
+.PP
+.PP
+Should compile as C or C++\&. C++ users are covered; airbag_fd catches SIGABRT\&. By default, std::terminate and std::unexpected abort() the program\&. Be sure to compile as C++ if you want name demangling\&.
+.PP
+\fBTodo\fP
+.RS 4
+.IP "\(bu" 2
+improve crashes on multiple threads: serialize output
+.IP "\(bu" 2
+chaining handlers?
+.IP "\(bu" 2
+better symbols on x86-64
+.IP "\(bu" 2
+improve GCC's unwind with bad PC, blown stack, etc
+.IP "\(bu" 2
+test on more OSs: bsd
+.IP "\(bu" 2
+if failed to get any backtrace, scan /proc/pid/maps for library offsets
+.IP "\(bu" 2
+stop other threads, get their backtraces
+.IP "\(bu" 2
+expose airbag_walkstack
+.IP "\(bu" 2
+arm: thumb mode
+.IP "\(bu" 2
+arm: http://www.mcternan.me.uk/ArmStackUnwinding/ 
+.PP
+.RE
+.PP
+\fBSee Also:\fP
+.RS 4
+https://github.com/ccoffing/airbag_fd 
+.RE
+.PP
+\fBAuthor:\fP
+.RS 4
+Chuck Coffing clc@alum.mit.edu 
+.RE
+.PP
+\fBCopyright:\fP
+.RS 4
+Copyright 2011 Chuck Coffing clc@alum.mit.edu, MIT licensed 
+.RE
+.PP
+
+.SH "Typedef Documentation"
+.PP 
+.SS "typedef void(* airbag_user_callback)(int fd)"
+Optional user callback, to print additional state at time of crash (build #, uptime, etc)\&. 
+.SH "Function Documentation"
+.PP 
+.SS "void airbag_deinit ()"
+Deregisters the crash handlers\&. 
+.SS "int airbag_init_fd (intfd, \fBairbag_user_callback\fPcb)"
+Registers crash handlers to output to the file descriptor\&. 
+.PP
+\fBReturns:\fP
+.RS 4
+0 iff registered; else errno is set\&. 
+.RE
+.PP
+
+.SS "int airbag_init_filename (const char *filename, \fBairbag_user_callback\fPcb)"
+Registers crash handlers to output to the named file\&. The file is created only if and when a crash occurs\&. 
+.PP
+\fBReturns:\fP
+.RS 4
+0 iff registered; else errno is set\&. 
+.RE
+.PP
+
+.SS "int airbag_printf (intfd, const char *fmt, \&.\&.\&.)"
+Extremely simple printf-replacement, which is asynchronous-signal safe\&. May be used from callback function during crash\&. Only supports:
+.IP "\(bu" 2
+%s for strings,
+.IP "\(bu" 2
+%x for hex-formatted integers (with optional width specifier),
+.IP "\(bu" 2
+%u for unsigned integers 
+.PP
+\fBReturns:\fP
+.RS 4
+Number of characters written 
+.RE
+.PP
+
+.PP
+
+.SS "void airbag_symbol (intfd, void *pc)"
+Looks up the file name, function name, and offset corresponding to pc\&. Writes text representation to fd\&. 
+.SH "Author"
+.PP 
+Generated automatically by Doxygen for airbag-fd from the source code\&.

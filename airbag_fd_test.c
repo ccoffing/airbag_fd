@@ -34,7 +34,6 @@ extern int crashFn3(int how)
         case 1: {
             fprintf(stderr, "!!! reading through bad pointer\n");
             return *(int *)0x123;
-            break;
         }
         case 2: {
             CrashPtrT f = (CrashPtrT)0x1;

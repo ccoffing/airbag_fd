@@ -23,7 +23,6 @@
  * want name demangling.
  *
  * @todo
- * - improve crashes on multiple threads: serialize output
  * - chaining handlers?
  * - better symbols on x86-64
  * - improve GCC's unwind with bad PC, blown stack, etc

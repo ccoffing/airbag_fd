@@ -31,9 +31,10 @@
 #define _GNU_SOURCE
 #endif
 #include <stdint.h>
-#include <sys/types.h>
 #include <stddef.h>
+#include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <stdarg.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -47,6 +48,7 @@
 #include <arpa/inet.h>  /* for htonl */
 #ifdef __linux__
 #include <sys/prctl.h>
+#include <sys/syscall.h>
 #endif
 #if !defined(DISABLE_BACKTRACE)
 #include <execinfo.h>
@@ -88,6 +90,9 @@ typedef void (*airbag_user_callback)(int fd);
 static int s_fd = -1;
 static const char* s_filename;
 static airbag_user_callback s_cb;
+#if defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4)
+static uint32_t busy, pending;
+#endif
 
 
 #if defined(USE_GCC_DEMANGLE)
@@ -733,10 +738,37 @@ static void printWhere(void* pc)
     airbag_printf(s_fd, " at %x\n", pc);
 }
 
+#if defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4)
+static uint64_t getNow()
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return tv.tv_sec*1000000LL + tv.tv_usec;
+}
+#endif
+
 static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
 {
     ucontext_t *uc = (ucontext_t*)ucontext;
     const uint8_t* pc = (uint8_t*)MCTX_PC(uc);
+
+#if defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4)
+    __sync_fetch_and_add(&pending, 1);
+    if (__sync_val_compare_and_swap(&busy, 0, 1) != 0) {
+        uint64_t now, start = getNow();
+        while (1) {
+            usleep(1000);
+            if (__sync_val_compare_and_swap(&busy, 0, 1) == 0)
+                break;
+            now = getNow();
+            if (now < start || now > start + 1000000) {
+                /* Timeout; perhaps another thread is recursively crashing or stuck
+                 * in airbag_uesr_callback.  Shut it down now. */
+                _exit(EXIT_FAILURE);
+            }
+        }
+    }
+#endif
 
     if (s_fd == -1 && s_filename)
         s_fd = open(s_filename, O_CREAT|O_WRONLY|O_TRUNC|O_CLOEXEC|O_SYNC, 0600);
@@ -817,6 +849,19 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
             airbag_printf(fd, " due to %s (%x).\n", faultReason, si->si_code);
         }
     }
+#ifdef __linux__
+    /* set your thread name with prctl(PR_SET_NAME, (unsigned long)name); */
+    {
+        char name[17];
+        prctl(PR_GET_NAME, (unsigned long)name, 0, 0, 0);
+        name[sizeof(name)-1] = 0;
+#ifdef SYS_gettid
+        airbag_printf(fd, "Thread %u: %s\n", syscall(SYS_gettid), name);
+#else
+        airbag_printf(fd, "Thread: %s\n", name);
+#endif
+    }
+#endif
 
 #if 0
     /*
@@ -844,15 +889,6 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
         width += airbag_printf(fd, "%s:%x", mctxRegNames[i], MCTXREG(uc, i));
     }
     airbag_printf(fd, "\n");
-#ifdef __linux__
-    /* set your thread name with prctl(PR_SET_NAME, (unsigned long)name); */
-    {
-        char name[17];
-        prctl(PR_GET_NAME, (unsigned long)name, 0, 0, 0);
-        name[sizeof(name)-1] = 0;
-        airbag_printf(fd, "Thread name: %s\n", name);
-    }
-#endif
 
     {
         const int size = 32;
@@ -928,6 +964,22 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
 
     /* Do not use abort(): Would re-raise SIGABRT. */
     /* Do not use exit(): Would run atexit handlers. */
+    /* For threads: pthread_exit is not async-signal-safe. */
+    /* Only option is to (optionally) wait and then _exit. */
+
+#if defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4)
+    __sync_fetch_and_add(&busy, -1);
+    if (__sync_fetch_and_add(&pending, -1) > 1) {
+        uint64_t now, start = getNow();
+        do {
+            usleep(1000);
+            now = getNow();
+            if (now < start || now > start + 1000000)
+                break;
+        } while (__sync_fetch_and_add(&pending, 0) > 0);
+    }
+#endif
+
     _exit(EXIT_FAILURE);
 }
 

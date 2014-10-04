@@ -34,7 +34,7 @@
  * - arm: http://www.mcternan.me.uk/ArmStackUnwinding/
  * @sa https://github.com/ccoffing/airbag_fd
  * @author Chuck Coffing <clc@alum.mit.edu>
- * @copyright Copyright 2011 Chuck Coffing <clc@alum.mit.edu>, MIT licensed
+ * @copyright Copyright 2011-2014 Chuck Coffing <clc@alum.mit.edu>, MIT licensed
  */
 
 #ifdef __cplusplus

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Chuck Coffing <clc@alum.mit.edu>
+ * Copyright (C) 2011-2014 Chuck Coffing <clc@alum.mit.edu>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in

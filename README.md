@@ -20,6 +20,31 @@ exercise for the reader.
    file descriptor.
 4. Post-crash (perhaps in a watchdog or on next startup) harvest crash logs.
 
+### Example
+
+    $ cat > test.c
+    #include "airbag_fd.h"
+    int main()
+    {
+    	airbag_init_fd(2, (void*)0);
+    	void (*fn)() = 0;
+    	fn();
+    	return 0;
+    }
+    $ gcc -g test.c airbag_fd.c -ldl -o test
+    $ ./test
+    Caught SIGSEGV (11) at 0
+    Fault at memory location 0x0 due to address not mapped to object (1).
+    Thread 2012: x
+    === Context:
+    R8:0 R9:4e5d2d70 R10:8 R11:202 R12:400b20 R13:4e5d3080 R14:0 R15:0 RDI:8
+    RSI:4e5d2cd0 RBP:4e5d2fa0 RBX:0 RDX:0 RAX:0 RCX:e93bd1fd RSP:4e5d2f88 RIP:0
+    EFL:10206 CSGSFS:33 ERR:14 TRAPNO:e OLDMASK:0 CR2:0
+    === Backtrace:
+    ...
+
+For further examples, see the `test` directory.
+
 ## Design
 
 All of airbag_fd's crash-gathering work is intended to be async-signal safe.  In
@@ -61,18 +86,10 @@ Help welcome anywhere.
 
 ## Notes:
 
-### Linux x86:
-
-(none)
-
 ### Linux x64:
 
 Currently no heuristics for trashed stack (x86_64 ABI encourages not saving
 FP).
-
-### mips:
-
-(none)
 
 ### arm:
 

@@ -763,7 +763,7 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
             now = getNow();
             if (now < start || now > start + 1000000) {
                 /* Timeout; perhaps another thread is recursively crashing or stuck
-                 * in airbag_uesr_callback.  Shut it down now. */
+                 * in airbag_user_callback.  Shut it down now. */
                 _exit(EXIT_FAILURE);
             }
         }

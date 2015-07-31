@@ -18,13 +18,13 @@
 
 typedef void (*CrashPtrT)();
 
-int crashFn1(int how);
+int CrashFn1(int how);
 
-int crashFn3(int how)
+int CrashFn3(int how)
 {
 	int i;
 	if (how < 0)
-		crashFn1(how);
+		CrashFn1(how);
 
 	switch (how) {
 		case 0:
@@ -33,7 +33,7 @@ int crashFn3(int how)
 			}
 			break;
 		case 1:
-			crashFn1(how);
+			CrashFn1(how);
 			break;
 		case 2:
 			fprintf(stderr, "!!! writing through bad pointer\n");
@@ -67,68 +67,72 @@ int crashFn3(int how)
 	return 42;
 }
 
-int crashFn2(int how)
+int CrashFn2(int how)
 {
-	return crashFn3(how);
+	return CrashFn3(how);
 }
 
-int crashFn1(int how)
+int CrashFn1(int how)
 {
-	return crashFn2(how);
+	return CrashFn2(how);
 }
 
-void callModifiers(int how);
-int hang_user_callback = 0;
-int crash_user_callback = 0;
+void CallModifiers(int how);
+int HangUserCallback = 0;
+int CrashUserCallback = 0;
 
-static void static_fn(int how)
+static void StaticFn(int how)
 {
-	how &= ~AFD_THRU_STATIC;
-	callModifiers(how);
+	CallModifiers(how);
 }
 
-int cmp_ints(const void *p1, const void *p2)
+int CmpInts(const void *p1, const void *p2)
 {
 	int how = *(int*)p1;
-	callModifiers(how);
+	CallModifiers(how);
 	return 0;
 }
 
-void user_callback(int fd)
+void ForkModifier(int how)
 {
-	while (hang_user_callback)
+	// TODO
+}
+
+void UserCallback(int fd)
+{
+	while (HangUserCallback)
 		usleep(1000);
-	if (crash_user_callback)
+	if (CrashUserCallback)
 		*(int *)0x123 = 0xdeadc0de;
 }
 
-void callModifiers(int how)
+void CallModifiers(int how)
 {
 	if (how & AFD_THRU_STATIC) {
-		static_fn(how & ~AFD_THRU_STATIC);
+		StaticFn(how & ~AFD_THRU_STATIC);
 	} else if (how & AFD_THRU_LIBC) {
 		how &= ~AFD_THRU_LIBC;
 		int a[] = {how, how};
-		qsort(&a[0], 2, sizeof(int), cmp_ints);
+		qsort(&a[0], 2, sizeof(int), CmpInts);
 	} else if (how & AFD_THRU_FORK) {
 		how &= ~AFD_THRU_FORK;
-		// TODO
+		ForkModifier(how);
 	} else if (how & AFD_HANG_CB) {
 		how &= ~AFD_HANG_CB;
-		hang_user_callback = 1;
+		HangUserCallback = 1;
 	} else if (how & AFD_CRASH_CB) {
 		how &= ~AFD_CRASH_CB;
-		crash_user_callback = 1;
+		CrashUserCallback = 1;
 	} else {
-		crashFn1(how);
+		CrashFn1(how);
 	}
 }
 
-void *crashMe(void *test)
+void *CrashMe(void *test)
 {
 	int t;
 	sscanf((char*)test, "%x", &t);
-	callModifiers(t);
+	CallModifiers(t);
 	return NULL;
 }
 
@@ -157,8 +161,8 @@ void usage()
 	fprintf(stderr, "\t0100 run test after calling through libc\n");
 	fprintf(stderr, "\t0200 run test after calling through static function\n");
 	fprintf(stderr, "\t0400 run test after forking\n");
-	fprintf(stderr, "\t0800 hang in airbag_user_callback\n");
-	fprintf(stderr, "\t1000 crash in airbag_user_callback\n");
+	fprintf(stderr, "\t0800 hang in callback\n");
+	fprintf(stderr, "\t1000 crash in callback\n");
 	// Test cases:
 	// - fork
 	// - call through statics
@@ -180,17 +184,17 @@ int main(int argc, char** argv)
 		usage();
 
 	fprintf(stderr, "!!! initializing crash handlers\n");
-	if (airbag_init_fd(2, user_callback) != 0) {
+	if (airbag_init_fd(2, UserCallback) != 0) {
 		perror("airbag_init_fd");
 		exit(3);
 	}
 
 	if (argc == 2)
-		crashMe(argv[1]);
+		CrashMe(argv[1]);
 	else {
 		pthread_t threads[argc-1];
 		for (i = 1; i < argc; ++i) {
-			pthread_create(&threads[i-1], NULL, crashMe, (void*)argv[i]);
+			pthread_create(&threads[i-1], NULL, CrashMe, (void*)argv[i]);
 		}
 		for (i = 1; i < argc; ++i) {
 			pthread_join(threads[i-1], NULL);

@@ -30,22 +30,22 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
-#include <stdint.h>
+#include <arpa/inet.h>  /* for htonl */
+#include <dlfcn.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <stdarg.h>
 #include <stddef.h>
-#include <sys/types.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <sys/time.h>
-#include <stdarg.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <string.h>
-#include <signal.h>
-#include <unistd.h>
-#include <stdlib.h>
+#include <sys/types.h>
 #include <ucontext.h>
-#include <stdio.h>
-#include <dlfcn.h>
-#include <arpa/inet.h>  /* for htonl */
+#include <unistd.h>
 #ifdef __linux__
 #include <sys/prctl.h>
 #include <sys/syscall.h>
@@ -61,8 +61,8 @@
 #endif
 
 #ifdef __ANDROID__
-#include <asm/sigcontext.h>  /* for sigcontext */
-#include <asm/signal.h>  /* for stack_t */
+#include <asm/sigcontext.h> /* for sigcontext */
+#include <asm/signal.h>     /* for stack_t */
 typedef struct ucontext {
     unsigned long uc_flags;
     struct ucontext *uc_link;
@@ -98,7 +98,7 @@ typedef struct ucontext {
 typedef void (*airbag_user_callback)(int fd);
 
 static int s_fd = -1;
-static const char* s_filename;
+static const char *s_filename;
 static airbag_user_callback s_cb;
 #if defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4)
 static uint32_t busy, pending;
@@ -106,12 +106,12 @@ static uint32_t busy, pending;
 
 
 #if defined(USE_GCC_DEMANGLE)
-static char* s_demangleBuf;
+static char *s_demangleBuf;
 static size_t s_demangleBufLen;
 #endif
 
-#define ALT_STACK_SIZE (MINSIGSTKSZ+256*sizeof(void*))  /* or let it all hang out: SIGSTKSZ */
-static void* s_altStackSpace;
+#define ALT_STACK_SIZE (MINSIGSTKSZ + 256 * sizeof(void *))  /* or let it all hang out: SIGSTKSZ */
+static void *s_altStackSpace;
 
 static const char comment[] = "# ";
 static const char section[] = "=== ";
@@ -158,7 +158,7 @@ static const char *sigNames[MAX_SIGNALS] =
 /*
  * Do not use strsignal; it is not async signal safe.
  */
-static const char* _strsignal(int sigNum)
+static const char *_strsignal(int sigNum)
 {
     return sigNum < 1 || sigNum >= MAX_SIGNALS ? unknown : sigNames[sigNum];
 }
@@ -168,7 +168,7 @@ static const char* _strsignal(int sigNum)
 #define NMCTXREGS NGREG
 #define MCTXREG(uc, i) (uc->uc_mcontext.gregs[i])
 #define MCTX_PC(uc) MCTXREG(uc, 16)
-static const char* mctxRegNames[NMCTXREGS] =
+static const char *mctxRegNames[NMCTXREGS] =
 {
     "R8", "R9", "R10", "R11", "R12", "R13", "R14", "R15", "RDI", "RSI", "RBP", "RBX",
     "RDX", "RAX", "RCX", "RSP", "RIP", "EFL", "CSGSFS", "ERR", "TRAPNO", "OLDMASK", "CR2"
@@ -177,16 +177,16 @@ static const char* mctxRegNames[NMCTXREGS] =
 #define NMCTXREGS NGREG
 #define MCTXREG(uc, i) (uc->uc_mcontext.gregs[i])
 #define MCTX_PC(uc) MCTXREG(uc, 14)
-static const char* mctxRegNames[NMCTXREGS] =
+static const char *mctxRegNames[NMCTXREGS] =
 {
     "GS", "FS", "ES", "DS", "EDI", "ESI", "EBP", "ESP", "EBX", "EDX",
     "ECX", "EAX", "TRAPNO", "ERR", "EIP", "CS", "EFL", "UESP", "SS"
 };
 #elif defined(__arm__)
 #define NMCTXREGS 21
-#define MCTXREG(uc, i) (((unsigned long*)(&uc->uc_mcontext))[i])
+#define MCTXREG(uc, i) (((unsigned long *)(&uc->uc_mcontext))[i])
 #define MCTX_PC(uc) MCTXREG(uc, 18)
-static const char* mctxRegNames[NMCTXREGS] =
+static const char *mctxRegNames[NMCTXREGS] =
 {
     "TRAPNO", "ERRCODE", "OLDMASK", "R0", "R1", "R2", "R3", "R4", "R5", "R6",
     "R7", "R8", "R9", "R10", "FP", "IP", "SP", "LR", "PC", "CPSR", "FAULTADDR"
@@ -196,7 +196,7 @@ static const int gregOffset = 3;
 #define NMCTXREGS NGREG
 #define MCTXREG(uc, i) (uc->uc_mcontext.gregs[i])
 #define MCTX_PC(uc) (uc->uc_mcontext.pc)
-static const char* mctxRegNames[NMCTXREGS] =
+static const char *mctxRegNames[NMCTXREGS] =
 {
     "ZERO", "AT", "V0", "V1", "A0", "A1", "A2", "A3",
 #if _MIPS_SIM == _ABIO32
@@ -211,47 +211,47 @@ static const char* mctxRegNames[NMCTXREGS] =
 
 #if 0
 #if defined(__MACH__)
-    #if __DARWIN_UNIX03
-        #if defined(__i386__)
-            pnt = (void*) uc->uc_mcontext->__ss.__eip;
-        #elif defined(__arm__)
-            /* don't see mcontext in iphone headers... */
-        #else
-            /* pnt = (void*) uc->uc_mcontext->__ss.__srr0; */
-        #endif
-    #else
-        #if defined(__i386__)
-            pnt = (void*) uc->uc_mcontext->ss.eip;
-        #elif defined(__arm__)
-            /* don't see mcontext in iphone headers... */
-        #else
-            pnt = (void*) uc->uc_mcontext->ss.srr0;
-        #endif
-    #endif
+#if __DARWIN_UNIX03
+#if defined(__i386__)
+pnt = (void *)uc->uc_mcontext->__ss.__eip;
+#elif defined(__arm__)
+/* don't see mcontext in iphone headers... */
+#else
+/* pnt = (void*) uc->uc_mcontext->__ss.__srr0; */
+#endif
+#else
+#if defined(__i386__)
+pnt = (void *)uc->uc_mcontext->ss.eip;
+#elif defined(__arm__)
+/* don't see mcontext in iphone headers... */
+#else
+pnt = (void *)uc->uc_mcontext->ss.srr0;
+#endif
+#endif
 #elif defined(__FreeBSD__)
-    #if defined(__i386__)
-        pnt = (void*) uc->uc_mcontext.mc_eip;
-    #elif defined(__x86_64__)
-        pnt = (void*) uc->uc_mcontext.mc_rip;
-    #endif
-#elif (defined (__ppc__)) || (defined (__powerpc__))
-    pnt = (void*) uc->uc_mcontext.regs->nip;
-#elif defined(__i386__)
-    pnt = (void*) uc->uc_mcontext.gregs[REG_EIP];
+#if defined(__i386__)
+pnt = (void *)uc->uc_mcontext.mc_eip;
 #elif defined(__x86_64__)
-    pnt = (void*) uc->uc_mcontext.gregs[REG_RIP];
+pnt = (void *)uc->uc_mcontext.mc_rip;
+#endif
+#elif (defined (__ppc__)) || (defined (__powerpc__))
+pnt = (void *)uc->uc_mcontext.regs->nip;
+#elif defined(__i386__)
+pnt = (void *)uc->uc_mcontext.gregs[REG_EIP];
+#elif defined(__x86_64__)
+pnt = (void *)uc->uc_mcontext.gregs[REG_RIP];
 #elif defined(__mips__)
 #ifdef CTX_EPC  /* Pre-2007 uclibc */
-    pnt = (void*) uc->uc_mcontext.gpregs[CTX_EPC];
+pnt = (void *)uc->uc_mcontext.gpregs[CTX_EPC];
 #else
-    pnt = (void*) uc->uc_mcontext.pc;
+pnt = (void *)uc->uc_mcontext.pc;
 #endif
 #endif
 #endif
 
 static uint8_t load8(const void *_p, uint8_t *v)
 {
-    static int fds[2] = {-1, -1};
+    static int fds[2] = { -1, -1 };
     uint8_t b;
     int r;
     const uint8_t *p = (const uint8_t *)_p;
@@ -264,11 +264,13 @@ static uint8_t load8(const void *_p, uint8_t *v)
     if (v)
         *v = 0;
     errno = 0;
-    while ((r = write(fds[1], p, 1)) < 1 && errno == EINTR)
+    while ((r = write(fds[1], p, 1)) < 1 && errno == EINTR) {
         ;
+    }
     if (r == 1) {
-        while ((r = read(fds[0], v ? v : &b, 1)) < 1 && errno == EINTR)
+        while ((r = read(fds[0], v ? v : &b, 1)) < 1 && errno == EINTR) {
             ;
+        }
         if (r == 1)
             return 0;
     }
@@ -285,11 +287,12 @@ static uint32_t load32(const void *_p, uint32_t *_v)
     uint32_t r = 0;
     uint32_t v = 0;
     const uint8_t *p = (const uint8_t *)_p;
+
     for (i = 0; i < 4; ++i) {
         uint8_t b;
         r <<= 8;
         v <<= 8;
-        r |= load8(p+i, &b);
+        r |= load8(p + i, &b);
         v |= b;
     }
     v = htonl(v);
@@ -299,10 +302,11 @@ static uint32_t load32(const void *_p, uint32_t *_v)
     return r;
 }
 
-static int airbag_write(int fd, const char* buf, size_t len)
+static int airbag_write(int fd, const char *buf, size_t len)
 {
-    while (write(fd, buf, len) == -1 && errno == EINTR)
+    while (write(fd, buf, len) == -1 && errno == EINTR) {
         ;
+    }
     return len;
 }
 
@@ -313,57 +317,58 @@ int airbag_printf(int fd, const char *fmt, ...)
     const int MAXDIGITS = 32;
     char buf[MAXDIGITS];
     va_list ap;
+
     va_start(ap, fmt);
     while (*fmt) {
         const char *p = strchr(fmt, '%');
-        size_t len = p ? (size_t)(p-fmt) : strlen(fmt);
+        size_t len = p ? (size_t)(p - fmt) : strlen(fmt);
         chars += airbag_write(fd, fmt, len);
         if (p) {
             int width = -1;
             ++p;
             while (*p >= '0' && *p <= '9') {
                 width *= (width < 0) ? 0 : 10;
-                width += (*p-'0');
-                len ++;
-                p ++;
+                width += (*p - '0');
+                len++;
+                p++;
             }
             switch (*p) {
-                case 's': {
-                    const char *s = va_arg(ap, char*);
-                    chars += airbag_write(fd, s, strlen(s));
-                    len += 2;
-                    break;
-                }
-                case 'x': {
-                    unsigned int n = va_arg(ap, unsigned int);
-                    int i = MAXDIGITS;
-                    buf[--i] = 0;
-                    do {
-                        unsigned int digit = (n & 0xf);
-                        n >>= 4;
-                        buf[--i] = (digit>9) ? (digit-10+'a') : (digit+'0');
-                    } while (n || width > MAXDIGITS-i-1);
-                    chars += airbag_write(fd, buf+i, MAXDIGITS-i-1);
-                    len += 2;
-                    break;
-                }
-                case 'u': {
-                    unsigned int n = va_arg(ap, unsigned int);
-                    int i = MAXDIGITS;
-                    buf[--i] = 0;
-                    do {
-                        int digit = n % 10;
-                        n /= 10;
-                        buf[--i] = digit+'0';
-                    } while (n);
-                    chars += airbag_write(fd, buf+i, MAXDIGITS-i-1);
-                    len += 2;
-                    break;
-                }
-                default:
-                    chars += airbag_write(fd, p-1, 1);
-                    len += 1;
-                    break;
+            case 's': {
+                const char *s = va_arg(ap, char *);
+                chars += airbag_write(fd, s, strlen(s));
+                len += 2;
+                break;
+            }
+            case 'x': {
+                unsigned int n = va_arg(ap, unsigned int);
+                int i = MAXDIGITS;
+                buf[--i] = 0;
+                do {
+                    unsigned int digit = (n & 0xf);
+                    n >>= 4;
+                    buf[--i] = (digit > 9) ? (digit - 10 + 'a') : (digit + '0');
+                } while (n || width > MAXDIGITS - i - 1);
+                chars += airbag_write(fd, buf + i, MAXDIGITS - i - 1);
+                len += 2;
+                break;
+            }
+            case 'u': {
+                unsigned int n = va_arg(ap, unsigned int);
+                int i = MAXDIGITS;
+                buf[--i] = 0;
+                do {
+                    int digit = n % 10;
+                    n /= 10;
+                    buf[--i] = digit + '0';
+                } while (n);
+                chars += airbag_write(fd, buf + i, MAXDIGITS - i - 1);
+                len += 2;
+                break;
+            }
+            default:
+                chars += airbag_write(fd, p - 1, 1);
+                len += 1;
+                break;
             }
         }
         fmt += len;
@@ -373,9 +378,9 @@ int airbag_printf(int fd, const char *fmt, ...)
 }
 
 
-static const char* demangle(const char *mangled)
+static const char *demangle(const char *mangled)
 {
-    if (! mangled)
+    if (!mangled)
         return unknown;
 #if defined(USE_GCC_DEMANGLE)
     int status;
@@ -392,6 +397,7 @@ static const char* demangle(const char *mangled)
 static void _airbag_symbol(int fd, void *pc, const char *sname, void *saddr)
 {
     int printed = 0;
+
 #if !defined(AIRBAG_NO_DLADDR)
     Dl_info info;
     if (dladdr(pc, &info)) {
@@ -420,8 +426,7 @@ void airbag_symbol(int fd, void *pc)
 }
 
 #ifdef USE_GCC_UNWIND
-struct trace_arg
-{
+struct trace_arg {
     void **array;
     int cnt;
     int size;
@@ -433,7 +438,7 @@ typedef _Unwind_Reason_Code (*Unwind_Backtrace_T) (_Unwind_Trace_Fn, void *);
 static Unwind_GetIP_T _unwind_GetIP;
 static _Unwind_Reason_Code backtrace_helper(struct _Unwind_Context *ctx, void *a)
 {
-    struct trace_arg *arg = (struct trace_arg*)a;
+    struct trace_arg *arg = (struct trace_arg *)a;
 
     /*  We are first called with address in the __backtrace function. Skip it. */
     if (arg->cnt != -1)
@@ -454,19 +459,20 @@ static void *getPokedFnName(int fd, uint32_t addr, char *fname)
 {
     unsigned int i;
     void *faddr = 0;
+
     addr &= ~3;
     /* GCC man page suggests len is at "pc - 12", but prologue can vary, so scan back */
     for (i = 0; i < 16; ++i) {
         uint32_t len;
         addr -= 4;
-        if (load32((void*)addr, &len) == 0 && (len&0xffffff00) == 0xff000000) {
+        if (load32((void *)addr, &len) == 0 && (len & 0xffffff00) == 0xff000000) {
             uint32_t offset;
             len &= 0xff;
-            faddr = (void*)(addr + 4);
+            faddr = (void *)(addr + 4);
             addr -= len;
             for (offset = 0; offset < len; ++offset) {
                 uint8_t c;
-                if (load8((void*)(addr + offset), &c))
+                if (load8((void *)(addr + offset), &c))
                     break;
                 fname[offset] = c;
             }
@@ -484,7 +490,7 @@ static int airbag_walkstack(int fd, void **buffer, int *repeat, int size, uconte
     (void)fd;
     (void)uc;
 
-    memset(repeat, 0, sizeof(int)*size);
+    memset(repeat, 0, sizeof(int) * size);
 #if defined(__mips__)
     /* Algorithm derived from:
      * http://elinux.org/images/6/68/ELC2008_-_Back-tracing_in_MIPS-based_Linux_Systems.pdf
@@ -493,9 +499,9 @@ static int airbag_walkstack(int fd, void **buffer, int *repeat, int size, uconte
     unsigned int raOffset, stackSize;
     uint32_t invalid;
 
-    pc = (uint32_t*)uc->uc_mcontext.pc;
-    ra = (uint32_t*)uc->uc_mcontext.gregs[31];
-    sp = (uint32_t*)uc->uc_mcontext.gregs[29];
+    pc = (uint32_t *)uc->uc_mcontext.pc;
+    ra = (uint32_t *)uc->uc_mcontext.gregs[31];
+    sp = (uint32_t *)uc->uc_mcontext.gregs[29];
 
     int depth = 0;
     buffer[depth++] = pc;
@@ -512,35 +518,35 @@ static int airbag_walkstack(int fd, void **buffer, int *repeat, int size, uconte
             goto backward;
         }
         switch (v & 0xffff0000) {
-            case 0x27bd0000:  /* addiu   sp,sp,??? */
-                stackSize = abs((short)(v & 0xffff));
-                airbag_printf(fd, "%s[%08x]: stack size %u\n", comment, addr, stackSize);
-                break;
-            case 0xafbf0000:  /* sw      ra,???(sp) */
-                raOffset = (v & 0xffff);
-                airbag_printf(fd, "%s[%08x]: ra offset %u\n", comment, addr, raOffset);
-                break;
-            case 0x3c1c0000:  /* lui     gp,??? */
-                goto out;
-            default:
-                break;
+        case 0x27bd0000:      /* addiu   sp,sp,??? */
+            stackSize = abs((short)(v & 0xffff));
+            airbag_printf(fd, "%s[%08x]: stack size %u\n", comment, addr, stackSize);
+            break;
+        case 0xafbf0000:      /* sw      ra,???(sp) */
+            raOffset = (v & 0xffff);
+            airbag_printf(fd, "%s[%08x]: ra offset %u\n", comment, addr, raOffset);
+            break;
+        case 0x3c1c0000:      /* lui     gp,??? */
+            goto out;
+        default:
+            break;
         }
     }
 out:
     if (raOffset) {
         uint32_t *newRa;
-        if (load32((uint32_t*)((uint32_t)sp + raOffset), (uint32_t*)&newRa))
+        if (load32((uint32_t *)((uint32_t)sp + raOffset), (uint32_t *)&newRa))
             airbag_printf(fd, "%sText at RA <- SP[raOffset] %x[%x] is not mapped; assuming blown stack.\n", comment, sp, raOffset);
         else
             ra = newRa;
     }
     if (stackSize)
-        sp = (uint32_t*)((uint32_t)sp + stackSize);
+        sp = (uint32_t *)((uint32_t)sp + stackSize);
 
 backward:
     while (depth < size && ra) {
-        if (buffer[depth-1] == ra)
-            repeat[depth-1] ++;
+        if (buffer[depth - 1] == ra)
+            repeat[depth - 1]++;
         else
             buffer[depth++] = ra;
         raOffset = stackSize = 0;
@@ -551,25 +557,25 @@ backward:
                 return depth;
             }
             switch (v & 0xffff0000) {
-                case 0x27bd0000:  /* addiu   sp,sp,??? */
-                    stackSize = abs((short)(v & 0xffff));
-                    airbag_printf(fd, "%s[%08x]: stack size %u\n", comment, addr, stackSize);
-                    break;
-                case 0xafbf0000:  /* sw      ra,???(sp) */
-                    raOffset = (v & 0xffff);
-                    airbag_printf(fd, "%s[%08x]: ra offset %u\n", comment, addr, raOffset);
-                    break;
-                case 0x3c1c0000:  /* lui     gp,??? */
-                    return depth + 1;
-                default:
-                    break;
+            case 0x27bd0000:      /* addiu   sp,sp,??? */
+                stackSize = abs((short)(v & 0xffff));
+                airbag_printf(fd, "%s[%08x]: stack size %u\n", comment, addr, stackSize);
+                break;
+            case 0xafbf0000:      /* sw      ra,???(sp) */
+                raOffset = (v & 0xffff);
+                airbag_printf(fd, "%s[%08x]: ra offset %u\n", comment, addr, raOffset);
+                break;
+            case 0x3c1c0000:      /* lui     gp,??? */
+                return depth + 1;
+            default:
+                break;
             }
         }
-        if (load32((uint32_t*)((uint32_t)sp + raOffset), (uint32_t*)&ra)) {
+        if (load32((uint32_t *)((uint32_t)sp + raOffset), (uint32_t *)&ra)) {
             airbag_printf(fd, "%sText at RA <- SP[raOffset] %x[%x] is not mapped; %s.\n", comment, sp, raOffset, termBt);
             break;
         }
-        sp = (uint32_t*)((uint32_t)sp + stackSize);
+        sp = (uint32_t *)((uint32_t)sp + stackSize);
     }
     return depth;
 #elif defined(__arm__)
@@ -579,11 +585,11 @@ backward:
     int depth = 0;
     char fname[257];
 
-    if (pc&3 || load32((void*)pc, NULL)) {
+    if (pc & 3 || load32((void *)pc, NULL)) {
         airbag_printf(fd, "%sCalled through bad function pointer; assuming PC <- LR.\n", comment);
         pc = MCTX_PC(uc) = lr;
     }
-    buffer[depth] = (void*)pc;
+    buffer[depth] = (void *)pc;
 
     /* Heuristic for gcc-generated code:
      *  - Know PC, FP for current frame.
@@ -606,38 +612,38 @@ backward:
         int found = 0;
         int i;
 
-        airbag_printf(fd, "%sSearching frame %u (FP=%x, PC=%x)\n", comment, depth-1, fp, pc);
+        airbag_printf(fd, "%sSearching frame %u (FP=%x, PC=%x)\n", comment, depth - 1, fp, pc);
 
         for (i = 0; i < 8192 && !found; ++i) {
             uint32_t instr, instr2;
-            if (load32((void*)(pc-i*4), &instr2)) {
-                airbag_printf(fd, "%sInstruction at %x is not mapped; %s.\n", comment, pc-i*4, termBt);
+            if (load32((void *)(pc - i * 4), &instr2)) {
+                airbag_printf(fd, "%sInstruction at %x is not mapped; %s.\n", comment, pc - i * 4, termBt);
                 return depth;
             }
-            if ((instr2 & (stmMask | (1<<11))) == (stmBits | (1<<11))) {
+            if ((instr2 & (stmMask | (1 << 11))) == (stmBits | (1 << 11))) {
                 void *faddr = 0;
                 uint32_t priorPc = lr;  /* If LR was pushed, will find and use that.  For now assume leaf function. */
                 uint32_t priorFp;
                 found = 1;
                 i++;
-                if (load32((void*)(pc-i*4), &instr) == 0 && (instr & stmMask) == stmBits) {
+                if (load32((void *)(pc - i * 4), &instr) == 0 && (instr & stmMask) == stmBits) {
                     int pushes, dir, pre, regNum;
 checkStm:
                     pushes = 0;
-                    dir = (instr & (1<<23)) ? 1 : -1;  /* U bit: increment or decrement? */
-                    pre = (instr & (1<<24)) ? 1 : 0;  /* P bit: pre  TODO */
-                    airbag_printf(fd, "%sPC-%02x[%8x]: %8x stm%s%s sp!\n", comment, i*4, pc-i*4, instr,
-                            pre==1?"f":"e", dir==1?"a":"d");
+                    dir = (instr & (1 << 23)) ? 1 : -1; /* U bit: increment or decrement? */
+                    pre = (instr & (1 << 24)) ? 1 : 0;  /* P bit: pre  TODO */
+                    airbag_printf(fd, "%sPC-%02x[%8x]: %8x stm%s%s sp!\n", comment, i * 4, pc - i * 4, instr,
+                            pre == 1 ? "f" : "e", dir == 1 ? "a" : "d");
                     for (regNum = 15; regNum >= 0; --regNum) {
-                        if (instr & (1<<regNum)) {
+                        if (instr & (1 << regNum)) {
                             uint32_t reg;
-                            if (load32((void*)(fp+pushes*4*dir), &reg)) {
+                            if (load32((void *)(fp + pushes * 4 * dir), &reg)) {
                                 airbag_printf(fd, "%sStack at %x is not mapped; %s.\n", comment,
-                                        fp+pushes*4*dir, termBt);
+                                        fp + pushes * 4 * dir, termBt);
                                 return depth;
                             }
-                            airbag_printf(fd, "%sFP%s%02x[%8x]: %8x {%s}\n", comment, dir==1?"+":"-", pushes*4,
-                                    fp+pushes*4*dir, reg, mctxRegNames[gregOffset + regNum]);
+                            airbag_printf(fd, "%sFP%s%02x[%8x]: %8x {%s}\n", comment, dir == 1 ? "+" : "-", pushes * 4,
+                                    fp + pushes * 4 * dir, reg, mctxRegNames[gregOffset + regNum]);
                             pushes++;
                             if (regNum == 11)
                                 priorFp = reg;
@@ -659,21 +665,21 @@ checkStm:
                     goto checkStm;
                 }
                 airbag_printf(fd, "%s%s ", comment, depth == 1 ? "Crashed at" : "Called from");
-                _airbag_symbol(fd, (void*)pc, fname, faddr);
+                _airbag_symbol(fd, (void *)pc, fname, faddr);
                 airbag_printf(fd, "\n");
                 pc = priorPc;
                 fp = priorFp;
             }
         }
 
-        if (! found) {
+        if (!found) {
             airbag_printf(fd, "%sFailed to find prior stack frame; %s.\n", comment, termBt);
             break;
         }
-        if (buffer[depth-1] == (void*)pc)
-            repeat[depth-1] ++;
+        if (buffer[depth - 1] == (void *)pc)
+            repeat[depth - 1]++;
         else
-            buffer[depth] = (void*)pc;
+            buffer[depth] = (void *)pc;
     }
     return depth;
 #elif defined(USE_GCC_UNWIND)
@@ -690,7 +696,7 @@ checkStm:
             _unwind_GetIP = (Unwind_GetIP_T)dlsym(handle, "_Unwind_GetIP");
         if (_unwind_Backtrace && _unwind_GetIP) {
             struct trace_arg arg = { buffer, -1, size, uc };
-            if (load8((void*)(MCTX_PC(uc)), NULL)) {
+            if (load8((void *)(MCTX_PC(uc)), NULL)) {
                 airbag_printf(fd, "%sText at %x is not mapped; trying prior frame pointer.\n", comment, MCTX_PC(uc));
 #if defined(__mips__)
                 MCTX_PC(uc) = MCTXREG(uc, 31);  /* RA */
@@ -698,9 +704,9 @@ checkStm:
                 MCTX_PC(uc) = MCTXREG(uc, 17);  /* LR */
 #elif defined(__i386__)
                 /* TODO heuristic for -fomit-frame-pointer? */
-                uint8_t* fp = (uint8_t*)MCTXREG(uc, 6) + 4;
+                uint8_t *fp = (uint8_t *)MCTXREG(uc, 6) + 4;
                 uint32_t eip;
-                if (load32((void*)fp, &eip)) {
+                if (load32((void *)fp, &eip)) {
                     airbag_printf(fd, "%sText at %x is not mapped; cannot get backtrace.\n", comment, fp);
                     size = 0;
                 } else {
@@ -735,7 +741,7 @@ checkStm:
 }
 
 
-static void printWhere(void* pc)
+static void printWhere(void *pc)
 {
 #if !defined(AIRBAG_NO_DLADDR)
     Dl_info info;
@@ -751,15 +757,16 @@ static void printWhere(void* pc)
 static uint64_t getNow()
 {
     struct timeval tv;
+
     gettimeofday(&tv, NULL);
-    return tv.tv_sec*1000000LL + tv.tv_usec;
+    return tv.tv_sec * 1000000LL + tv.tv_usec;
 }
 #endif
 
 static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
 {
-    ucontext_t *uc = (ucontext_t*)ucontext;
-    const uint8_t* pc = (uint8_t*)MCTX_PC(uc);
+    ucontext_t *uc = (ucontext_t *)ucontext;
+    const uint8_t *pc = (uint8_t *)MCTX_PC(uc);
 
 #if defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4)
     __sync_fetch_and_add(&pending, 1);
@@ -780,7 +787,7 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
 #endif
 
     if (s_fd == -1 && s_filename)
-        s_fd = open(s_filename, O_CREAT|O_WRONLY|O_TRUNC|O_CLOEXEC|O_SYNC, 0600);
+        s_fd = open(s_filename, O_CREAT | O_WRONLY | O_TRUNC | O_CLOEXEC | O_SYNC, 0600);
     if (s_fd == -1)
         s_fd = 2;
     int fd = s_fd;
@@ -792,65 +799,90 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
         airbag_printf(fd, " sent by tkill\n");
     else if (si->si_code == SI_KERNEL) {
         airbag_printf(fd, " sent by kernel");  /* rare; well-behaved kernel gives us a real code, handled below */
-        printWhere((void*)pc);
+        printWhere((void *)pc);
     } else {
-        printWhere((void*)pc);
+        printWhere((void *)pc);
 
-        const char* faultReason = 0;
-        switch(sigNum) {
-            case SIGABRT:
+        const char *faultReason = 0;
+        switch (sigNum) {
+        case SIGABRT:
+            break;
+        case SIGBUS: {
+            switch (si->si_code) {
+            case BUS_ADRALN: faultReason = "invalid address alignment";
                 break;
-            case SIGBUS: {
-                switch (si->si_code) {
-                    case BUS_ADRALN: faultReason = "invalid address alignment"; break;
-                    case BUS_ADRERR: faultReason = "nonexistent physical address"; break;
-                    case BUS_OBJERR: faultReason = "object-specific hardware error"; break;
-                    default: faultReason = "unknown"; break;
-                }
+            case BUS_ADRERR: faultReason = "nonexistent physical address";
                 break;
-            }
-            case SIGFPE: {
-                switch (si->si_code) {
-                    case FPE_INTDIV: faultReason = "integer divide by zero"; break;
-                    case FPE_INTOVF: faultReason = "integer overflow"; break;
-                    case FPE_FLTDIV: faultReason = "floating-point divide by zero"; break;
-                    case FPE_FLTOVF: faultReason = "floating-point overflow"; break;
-                    case FPE_FLTUND: faultReason = "floating-point underflow"; break;
-                    case FPE_FLTRES: faultReason = "floating-point inexact result"; break;
-                    case FPE_FLTINV: faultReason = "floating-point invalid operation"; break;
-                    case FPE_FLTSUB: faultReason = "subscript out of range"; break;
-                    default: faultReason = "unknown"; break;
-                }
+            case BUS_OBJERR: faultReason = "object-specific hardware error";
+                break;
+            default: faultReason = "unknown";
                 break;
             }
-            case SIGILL: {
-                switch (si->si_code) {
-                    case ILL_ILLOPC: faultReason = "illegal opcode"; break;
-                    case ILL_ILLOPN: faultReason = "illegal operand"; break;
-                    case ILL_ILLADR: faultReason = "illegal addressing mode"; break;
-                    case ILL_ILLTRP: faultReason = "illegal trap"; break;
-                    case ILL_PRVOPC: faultReason = "privileged opcode"; break;
-                    case ILL_PRVREG: faultReason = "privileged register"; break;
-                    case ILL_COPROC: faultReason = "coprocessor error"; break;
-                    case ILL_BADSTK: faultReason = "stack error"; break;
-                    default: faultReason = "unknown"; break;
-                }
+            break;
+        }
+        case SIGFPE: {
+            switch (si->si_code) {
+            case FPE_INTDIV: faultReason = "integer divide by zero";
+                break;
+            case FPE_INTOVF: faultReason = "integer overflow";
+                break;
+            case FPE_FLTDIV: faultReason = "floating-point divide by zero";
+                break;
+            case FPE_FLTOVF: faultReason = "floating-point overflow";
+                break;
+            case FPE_FLTUND: faultReason = "floating-point underflow";
+                break;
+            case FPE_FLTRES: faultReason = "floating-point inexact result";
+                break;
+            case FPE_FLTINV: faultReason = "floating-point invalid operation";
+                break;
+            case FPE_FLTSUB: faultReason = "subscript out of range";
+                break;
+            default: faultReason = "unknown";
                 break;
             }
-            case SIGINT:
+            break;
+        }
+        case SIGILL: {
+            switch (si->si_code) {
+            case ILL_ILLOPC: faultReason = "illegal opcode";
                 break;
-            case SIGQUIT:
+            case ILL_ILLOPN: faultReason = "illegal operand";
                 break;
-            case SIGTERM:
+            case ILL_ILLADR: faultReason = "illegal addressing mode";
                 break;
-            case SIGSEGV: {
-                switch (si->si_code) {
-                    case SEGV_MAPERR: faultReason = "address not mapped to object"; break;
-                    case SEGV_ACCERR: faultReason = "invalid permissions for mapped object"; break;
-                    default: faultReason = "unknown"; break;
-                }
+            case ILL_ILLTRP: faultReason = "illegal trap";
+                break;
+            case ILL_PRVOPC: faultReason = "privileged opcode";
+                break;
+            case ILL_PRVREG: faultReason = "privileged register";
+                break;
+            case ILL_COPROC: faultReason = "coprocessor error";
+                break;
+            case ILL_BADSTK: faultReason = "stack error";
+                break;
+            default: faultReason = "unknown";
                 break;
             }
+            break;
+        }
+        case SIGINT:
+            break;
+        case SIGQUIT:
+            break;
+        case SIGTERM:
+            break;
+        case SIGSEGV: {
+            switch (si->si_code) {
+            case SEGV_MAPERR: faultReason = "address not mapped to object";
+                break;
+            case SEGV_ACCERR: faultReason = "invalid permissions for mapped object";
+                break;
+            default: faultReason = "unknown";
+                break;
+            }
+            break;
+        }
         }
 
         if (faultReason) {
@@ -862,7 +894,7 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
     {
         char name[17];
         prctl(PR_GET_NAME, (unsigned long)name, 0, 0, 0);
-        name[sizeof(name)-1] = 0;
+        name[sizeof(name) - 1] = 0;
 #ifdef SYS_gettid
         airbag_printf(fd, "Thread %u: %s\n", syscall(SYS_gettid), name);
 #else
@@ -885,7 +917,7 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
     int width = 0;
     int i;
     for (i = 0; i < NMCTXREGS; ++i) {
-        if (! mctxRegNames[i])  /* Can trim junk per-arch by NULL-ing name. */
+        if (!mctxRegNames[i])   /* Can trim junk per-arch by NULL-ing name. */
             continue;
         if (i) {
             if (width > 70) {
@@ -900,39 +932,39 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
 
     {
         const int size = 32;
-        void* buffer[size];
+        void *buffer[size];
         int repeat[size];
         airbag_printf(fd, "%sBacktrace:\n", section);
         int nptrs = airbag_walkstack(fd, buffer, repeat, size, uc);
         for (i = 0; i < nptrs; ++i) {
             airbag_symbol(fd, buffer[i]);
             if (repeat[i])
-                airbag_printf(fd, " (called %u times)", repeat[i]+1);
+                airbag_printf(fd, " (called %u times)", repeat[i] + 1);
             airbag_printf(fd, "\n");
         }
         /* Reload PC; walkstack may have discovered better state. */
-        pc = (uint8_t*)MCTX_PC(uc);
+        pc = (uint8_t *)MCTX_PC(uc);
     }
 
     width = 0;
     ptrdiff_t bytes = 128;
 #if defined(__x86_64__) || defined(__i386__)
-    const uint8_t* startPc = pc;
-    if (startPc < (uint8_t*)(bytes/2))
+    const uint8_t *startPc = pc;
+    if (startPc < (uint8_t *)(bytes / 2))
         startPc = 0;
     else
-        startPc = pc - bytes/2;
-    const uint8_t* endPc = startPc + bytes;
-    const uint8_t* addr;
+        startPc = pc - bytes / 2;
+    const uint8_t *endPc = startPc + bytes;
+    const uint8_t *addr;
 #else
-    pc = (uint8_t*)(((uint32_t)pc) & ~3);
-    const uint32_t* startPc = (uint32_t*)pc;
-    if (startPc < (uint32_t*)(bytes/2))
+    pc = (uint8_t *)(((uint32_t)pc) & ~3);
+    const uint32_t *startPc = (uint32_t *)pc;
+    if (startPc < (uint32_t *)(bytes / 2))
         startPc = 0;
     else
-        startPc = (uint32_t*)(pc - bytes/2);
-    const uint32_t* endPc = (uint32_t*)((uint8_t*)startPc + bytes);
-    const uint32_t* addr;
+        startPc = (uint32_t *)(pc - bytes / 2);
+    const uint32_t *endPc = (uint32_t *)((uint8_t *)startPc + bytes);
+    const uint32_t *addr;
 #endif
     airbag_printf(fd, "%sCode:\n", section);
     for (addr = startPc; addr < endPc; ++addr) {
@@ -943,7 +975,7 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
         if (width == 0) {
             airbag_printf(fd, "%x: ", addr);
         }
-        width += airbag_printf(fd, (const uint8_t*)addr == pc ? ">" : " ");
+        width += airbag_printf(fd, (const uint8_t *)addr == pc ? ">" : " ");
 #if defined(__x86_64__) || defined(__i386__)
         uint8_t b;
         uint8_t invalid = load8(addr, &b);
@@ -956,11 +988,11 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
         uint32_t w;
         uint32_t invalid = load32(addr, &w);
         for (i = 3; i >= 0; --i) {
-            int shift = i*8;
-            if ((invalid>>shift) & 0xff)
+            int shift = i * 8;
+            if ((invalid >> shift) & 0xff)
                 airbag_printf(fd, "??");
             else
-                airbag_printf(fd, "%02x", (w>>shift) & 0xff);
+                airbag_printf(fd, "%02x", (w >> shift) & 0xff);
         }
         width += 8;
 #endif
@@ -994,18 +1026,18 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
 static int initCrashHandlers()
 {
 #if defined(USE_GCC_DEMANGLE)
-    if (! s_demangleBuf) {
+    if (!s_demangleBuf) {
         s_demangleBufLen = 512;
-        s_demangleBuf = (char*)malloc(s_demangleBufLen);
-        if (! s_demangleBuf)
+        s_demangleBuf = (char *)malloc(s_demangleBufLen);
+        if (!s_demangleBuf)
             return -1;
     }
 #endif
 
-    if (! s_altStackSpace) {
+    if (!s_altStackSpace) {
         stack_t altStack;
-        s_altStackSpace = (void*)malloc(ALT_STACK_SIZE);
-        if (! s_altStackSpace)
+        s_altStackSpace = (void *)malloc(ALT_STACK_SIZE);
+        if (!s_altStackSpace)
             return -1;
         altStack.ss_sp = s_altStackSpace;
         altStack.ss_flags = 0;
@@ -1044,6 +1076,7 @@ static void deinitCrashHandlers()
 {
     struct sigaction sa;
     sigset_t mysigset;
+
     sigemptyset(&mysigset);
 
     sa.sa_handler = SIG_DFL;
@@ -1116,4 +1149,3 @@ void airbag_deinit()
     s_cb = 0;
     deinitCrashHandlers();
 }
-

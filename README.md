@@ -15,7 +15,7 @@ exercise for the reader.
 ## Quick start:
 
 1. Include `airbag_fd.c` and `airbag_fd.h` in your project.
-2. If it doesn't build, define the appropriate `DISABLE_*` flag(s).
+2. If it doesn't build, define the appropriate `AIRBAG_NO_*` flag(s).
 3. Call one of the `airbag_init_*` functions early, to accept crash data via a
    file descriptor.
 4. Post-crash (perhaps in a watchdog or on next startup) harvest crash logs.

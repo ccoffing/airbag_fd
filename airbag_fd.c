@@ -21,7 +21,7 @@
  */
 
 #ifdef __ANDROID__
-#define DISABLE_BACKTRACE
+#define AIRBAG_NO_BACKTRACE
 #endif
 
 #ifndef _BSD_SOURCE
@@ -50,8 +50,14 @@
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 #endif
-#if !defined(DISABLE_BACKTRACE)
+#if !defined(AIRBAG_NO_BACKTRACE)
 #include <execinfo.h>
+#endif
+#if !defined(AIRBAG_NO_PTHREAD)
+#if defined(__FreeBSD__)
+#include <pthread.h>
+#include <pthread_np.h>
+#endif
 #endif
 
 #ifdef __ANDROID__
@@ -74,7 +80,11 @@ typedef struct ucontext {
  * ahead of time, and that shouldn't actually happen.
  */
 #define USE_GCC_DEMANGLE
+#define AIRBAG_EXPORT extern "C"
+#else
+#define AIRBAG_EXPORT
 #endif
+
 #if defined(__GNUC__) && !defined(__clang__)
 #include <unwind.h>
 #define USE_GCC_UNWIND
@@ -296,9 +306,7 @@ static int airbag_write(int fd, const char* buf, size_t len)
     return len;
 }
 
-#if defined(__cplusplus)
-extern "C"
-#endif
+AIRBAG_EXPORT
 int airbag_printf(int fd, const char *fmt, ...)
 {
     int chars = 0;
@@ -384,7 +392,7 @@ static const char* demangle(const char *mangled)
 static void _airbag_symbol(int fd, void *pc, const char *sname, void *saddr)
 {
     int printed = 0;
-#if !defined(DISABLE_DLADDR)
+#if !defined(AIRBAG_NO_DLADDR)
     Dl_info info;
     if (dladdr(pc, &info)) {
         int offset;
@@ -405,9 +413,7 @@ static void _airbag_symbol(int fd, void *pc, const char *sname, void *saddr)
     }
 }
 
-#if defined(__cplusplus)
-extern "C"
-#endif
+AIRBAG_EXPORT
 void airbag_symbol(int fd, void *pc)
 {
     _airbag_symbol(fd, pc, 0, 0);
@@ -475,6 +481,9 @@ static void *getPokedFnName(int fd, uint32_t addr, char *fname)
 
 static int airbag_walkstack(int fd, void **buffer, int *repeat, int size, ucontext_t *uc)
 {
+    (void)fd;
+    (void)uc;
+
     memset(repeat, 0, sizeof(int)*size);
 #if defined(__mips__)
     /* Algorithm derived from:
@@ -714,7 +723,7 @@ checkStm:
         }
     }
     return 0;
-#elif !defined(DISABLE_BACKTRACE)
+#elif !defined(AIRBAG_NO_BACKTRACE)
     /*
      * Not preferred, because no way to explicitly start at failing PC, doesn't handle
      * bad PC, doesn't handle blown stack, etc.
@@ -728,7 +737,7 @@ checkStm:
 
 static void printWhere(void* pc)
 {
-#if !defined(DISABLE_DLADDR)
+#if !defined(AIRBAG_NO_DLADDR)
     Dl_info info;
     if (dladdr(pc, &info)) {
         airbag_printf(s_fd, " in %s\n", demangle(info.dli_sname));
@@ -850,7 +859,6 @@ static void sigHandler(int sigNum, siginfo_t *si, void *ucontext)
         }
     }
 #ifdef __linux__
-    /* set your thread name with prctl(PR_SET_NAME, (unsigned long)name); */
     {
         char name[17];
         prctl(PR_GET_NAME, (unsigned long)name, 0, 0, 0);
@@ -1066,9 +1074,7 @@ static void deinitCrashHandlers()
 }
 
 
-#if defined(__cplusplus)
-extern "C"
-#endif
+AIRBAG_EXPORT
 int airbag_init_fd(int fd, airbag_user_callback cb)
 {
     s_fd = fd;
@@ -1077,9 +1083,7 @@ int airbag_init_fd(int fd, airbag_user_callback cb)
     return initCrashHandlers();
 }
 
-#if defined(__cplusplus)
-extern "C"
-#endif
+AIRBAG_EXPORT
 int airbag_init_filename(const char *filename, airbag_user_callback cb)
 {
     s_fd = -1;
@@ -1088,9 +1092,23 @@ int airbag_init_filename(const char *filename, airbag_user_callback cb)
     return initCrashHandlers();
 }
 
-#if defined(__cplusplus)
-extern "C"
+AIRBAG_EXPORT
+int airbag_name_thread(const char *name)
+{
+#if defined(__linux__)
+    prctl(PR_SET_NAME, (unsigned long)name);
+    return 0;
+#elif defined(__FreeBSD__) && !defined(AIRBAG_NO_PTHREAD)
+    pthread_set_name_np(pthread_self(), name);
+    return 0;
+#else
+    (void)name;
+    errno = ENOTSUP;
+    return -1;
 #endif
+}
+
+AIRBAG_EXPORT
 void airbag_deinit()
 {
     s_fd = -1;

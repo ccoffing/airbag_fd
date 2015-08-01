@@ -15,8 +15,9 @@
  * of the crash log is left as an exercise for the reader.
  *
  * The common case requires no <tt>\#defines</tt>.  Optional defines:
- * - DISABLE_DLADDR
- * - DISABLE_BACKTRACE
+ * - AIRBAG_NO_PTHREADS
+ * - AIRBAG_NO_DLADDR
+ * - AIRBAG_NO_BACKTRACE
  *
  * Should compile as C or C++.  C++ users are covered; airbag_fd catches SIGABRT.  By default,
  * std::terminate and std::unexpected abort() the program.  Be sure to compile as C++ if you
@@ -41,26 +42,27 @@
 extern "C" {
 #endif
 
-/**
- * Optional user callback, to print additional state at time of crash (build #, uptime, etc).
+/** Optional user callback, to print additional state at time of crash (build #, uptime, etc).
  */
 typedef void (*airbag_user_callback)(int fd);
 
-/**
- * Registers crash handlers to output to the file descriptor.
+/** Registers crash handlers to output to the file descriptor.
  * @return 0 iff registered; else errno is set.
  */
 int airbag_init_fd(int fd, airbag_user_callback cb);
 
-/**
- * Registers crash handlers to output to the named file.  The file is created only if and when
+/** Registers crash handlers to output to the named file.  The file is created only if and when
  * a crash occurs.
  * @return 0 iff registered; else errno is set.
  */
 int airbag_init_filename(const char *filename, airbag_user_callback cb);
 
-/**
- * Extremely simple printf-replacement, which is asynchronous-signal safe.
+/** Names the current thread.
+ * @return 0 iff name is set; else errno is set.
+ */
+int airbag_name_thread(const char *name);
+
+/** Extremely simple printf-replacement, which is asynchronous-signal safe.
  * May be used from callback function during crash.  Only supports:
  * - %%s for strings,
  * - %%x for hex-formatted integers (with optional width specifier),
@@ -69,14 +71,12 @@ int airbag_init_filename(const char *filename, airbag_user_callback cb);
  */
 int airbag_printf(int fd, const char *fmt, ...);
 
-/**
- * Looks up the file name, function name, and offset corresponding to pc.
+/** Looks up the file name, function name, and offset corresponding to pc.
  * Writes text representation to fd.
  */
 void airbag_symbol(int fd, void *pc);
 
-/**
- * Deregisters the crash handlers.
+/** Deregisters the crash handlers.
  */
 void airbag_deinit();
 

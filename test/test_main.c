@@ -88,18 +88,23 @@ static void StaticFn(int how)
 
 int CmpInts(const void *p1, const void *p2)
 {
+	(void)p2;
 	int how = *(int*)p1;
+
 	CallModifiers(how);
 	return 0;
 }
 
 void ForkModifier(int how)
 {
+	(void)how;
 	// TODO
 }
 
 void UserCallback(int fd)
 {
+	(void)fd;
+
 	while (HangUserCallback)
 		usleep(1000);
 	if (CrashUserCallback)
